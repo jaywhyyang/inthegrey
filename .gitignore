@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+
+# KOBIS 로그인 자격증명 (공개 저장소에 올리지 않음)
+kobis_login.txt
