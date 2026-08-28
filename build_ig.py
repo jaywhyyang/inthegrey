@@ -14,7 +14,9 @@ OUT_PATH = os.path.join(BASE, "index.html")
 OPEN_DATE = datetime.date(2026, 9, 2)
 PROMO_BASE = 3000          # 1주차 티켓 프로모션(집행 완료) — 이 위가 실예매(organic)
 # [내부 정보] 2주차 +1,000장 추가 예정(현재는 미집행, 공개 표기 안 함)
-BENCH_LO, BENCH_MID, BENCH_HI = 17000, 35000, 64000  # 메가박스 단독 comp 밴드
+# 메가박스 단독개봉 comp 분석(in_the_grey_report) 실측 밴드:
+# 중심 2.0만–2.5만 / 가능범위 1.5만–6.4만(하방 1.5만·상방시나리오 3.4만·실사외화단독 최고사례 6.4만)
+BAND_LO, BAND_MID_LO, BAND_MID_HI, BAND_HIGH, BAND_CEIL = 15000, 20000, 25000, 34000, 63767
 
 
 def _num(s):
@@ -90,7 +92,9 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__CUM__", (f"{cum:,}" if cum else "—"))
     html = html.replace("__SPARK__", spark or '<div class="empty">예매 추세는 수집이 몇 시간 쌓이면 표시됩니다</div>')
     html = html.replace("__UPD__", upd or "수집 대기 중")
-    html = html.replace("__BLO__", f"{BENCH_LO:,}").replace("__BMID__", f"{BENCH_MID:,}").replace("__BHI__", f"{BENCH_HI:,}")
+    html = (html.replace("__BLO__", f"{BAND_LO:,}").replace("__BHI__", f"{BAND_CEIL:,}")
+            .replace("__BMIDLO__", f"{BAND_MID_LO:,}").replace("__BMIDHI__", f"{BAND_MID_HI:,}")
+            .replace("__BHIGH__", f"{BAND_HIGH:,}"))
     html = html.replace("__PROMO__", f"{PROMO_BASE:,}")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
@@ -156,9 +160,9 @@ _TPL = """<!doctype html>
   </div>
 
   <div class="panel">
-    <h2>흥행 기대 밴드 (메가박스 단독 comp)</h2>
-    <div class="band"><span>하방 __BLO__</span><div class="bar"></div><span>상방 __BHI__</span></div>
-    <div class="empty" style="padding:8px 0 0;text-align:left">중심값 __BMID__명 · 개봉 후 실측으로 좁혀갑니다.</div>
+    <h2>흥행 기대 밴드 (메가박스 단독개봉 comp)</h2>
+    <div class="band"><span>하방 __BLO__</span><div class="bar"></div><span>최대 사례 __BHI__</span></div>
+    <div class="empty" style="padding:8px 0 0;text-align:left">중심 밴드 <b>__BMIDLO__–__BMIDHI__명</b> · 상방 시나리오 __BHIGH__ · 실사 외화 단독 최고 사례 __BHI__ · 개봉 후 실측으로 좁혀갑니다.</div>
   </div>
 
   <div class="foot"><span class="dot"></span>1시간 단위 자동 갱신 · 마지막 갱신 __UPD__</div>
