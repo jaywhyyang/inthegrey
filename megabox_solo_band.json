@@ -1,0 +1,120 @@
+{
+  "schema": "megabox-solo-band/1",
+  "generated_from": "build_megabox_solo.py → megabox_solo_final.csv",
+  "data_range": {
+    "start": "2023-01-09",
+    "end": "2026-08-26"
+  },
+  "segment": {
+    "label": "실사 외화 × 메가박스 150관 이상 (일본 제외)",
+    "n": 5,
+    "min_screens": 150,
+    "exclude_nation": "일본"
+  },
+  "observed": {
+    "max": 63767,
+    "min": 17119,
+    "median": 20138,
+    "p25": 18670,
+    "p75": 21014,
+    "opening_seats_median": 53148,
+    "opening_aud_median": 3815,
+    "sell_rate_median": 0.0842
+  },
+  "scenario": {
+    "low": 19200.0,
+    "mid": 24500.0,
+    "high": 34400.0,
+    "ceiling": 63767,
+    "assumptions": {
+      "opening_seats": 50000,
+      "sell_rates": {
+        "low": 0.066,
+        "mid": 0.085,
+        "high": 0.121
+      },
+      "note": "scenario 는 개봉일 좌석 50,000석 가정 위의 값이다. 편성이 이보다 좁으면 한 단계 낮춰 읽을 것. ceiling 은 장르 무관 실사 외화 단독 최고 실측치이며, 액션·범죄로 좁히면 역대 최고는 21,014(워킹맨)이다."
+    }
+  },
+  "model": {
+    "form": "ln(final) = a + b * ln(opening_admissions)",
+    "a": 2.0749,
+    "b": 0.9614,
+    "r2": 0.609,
+    "resid_sd": 0.552,
+    "n": 28,
+    "interval_68": [
+      0.576,
+      1.736
+    ],
+    "fit_on": "실사 외화 신작 단독개봉(일본 제외) 전체"
+  },
+  "pacing": {
+    "desc": "개봉 N일차 누적 / 최종 (중앙값). D3가 0.40을 넘길 기세면 즉시소진형(2만대), 0.30 안팎이면 롱런형.",
+    "median": {
+      "D1": 0.173,
+      "D3": 0.37,
+      "D7": 0.747,
+      "D11": 0.889,
+      "D14": 0.948,
+      "D21": 0.965,
+      "D28": 0.973
+    },
+    "n": 4
+  },
+  "comps": [
+    {
+      "title": "머티리얼리스트",
+      "open": "2025-08-08",
+      "genre": "멜로/로맨스,코미디",
+      "screens": 157,
+      "opening_seats": 62670,
+      "opening_aud": 7585,
+      "final": 63767,
+      "status": "종영"
+    },
+    {
+      "title": "워킹맨",
+      "open": "2025-10-01",
+      "genre": "액션,스릴러,범죄",
+      "screens": 172,
+      "opening_seats": 52983,
+      "opening_aud": 4459,
+      "final": 21014,
+      "status": "종영"
+    },
+    {
+      "title": "크라임 101",
+      "open": "2026-04-08",
+      "genre": "범죄,드라마,스릴러",
+      "screens": 171,
+      "opening_seats": 53148,
+      "opening_aud": 3513,
+      "final": 20138,
+      "status": "종영"
+    },
+    {
+      "title": "더 로즈: 완벽한 이혼",
+      "open": "2025-09-17",
+      "genre": "코미디,드라마",
+      "screens": 152,
+      "opening_seats": 54406,
+      "opening_aud": 3185,
+      "final": 18670,
+      "status": "종영"
+    },
+    {
+      "title": "워페어",
+      "open": "2026-08-19",
+      "genre": "액션,드라마,전쟁",
+      "screens": 188,
+      "opening_seats": 45012,
+      "opening_aud": 3815,
+      "final": 17119,
+      "status": "상영중(잠정)"
+    }
+  ],
+  "caveats": [
+    "아직 상영 중이라 최종이 아닌 작품이 포함됨: 워페어. 종영 후 재생성하면 밴드가 바뀐다."
+  ]
+}

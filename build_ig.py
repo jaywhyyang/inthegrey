@@ -2,10 +2,11 @@
 """
 인 더 그레이(2026-09-02 개봉) 개봉 전/후 실시간 예매 트래커 대시보드.
 inthegrey_hourly.csv(실시간 예매 스냅샷)를 읽어 자체 완결형 index.html 생성.
-- 개봉 전: 예매관객 빌드업 + 프로모(3,000장) 제외 실예매 + 예매율/순위 추세.
-- 벤치마크: 메가박스 단독개봉 밴드 1.7만~6.4만(별도 comp 분석).
+- 개봉 전: 예매관객 빌드업 + 예매율/순위 추세.
+- 벤치마크 밴드는 ../그린랜드2/megabox_solo_band.json 에서 매 빌드마다 읽는다(하드코딩 금지).
+- 프로모 분해는 SHOW_ORGANIC=False 로 공개 페이지에서 가린다(집행 장수 역산 방지).
 """
-import os, csv, io, re, datetime
+import os, csv, io, re, json, datetime
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE, "inthegrey_hourly.csv")
@@ -14,9 +15,49 @@ OUT_PATH = os.path.join(BASE, "index.html")
 OPEN_DATE = datetime.date(2026, 9, 2)
 PROMO_BASE = 3000          # 1주차 티켓 프로모션(집행 완료) — 이 위가 실예매(organic)
 # [내부 정보] 2주차 +1,000장 추가 예정(현재는 미집행, 공개 표기 안 함)
-# 메가박스 단독개봉 comp 분석(in_the_grey_report) 실측 밴드:
-# 중심 2.0만–2.5만 / 가능범위 1.5만–6.4만(하방 1.5만·상방시나리오 3.4만·실사외화단독 최고사례 6.4만)
+# 실예매(프로모 제외) 공개 여부.
+# 트레이드오프: 누적 예매는 KOBIS 공개 데이터라 누구나 조회할 수 있다. 따라서 실예매를
+# 표시하면 KOBIS 누적에서 빼는 것만으로 프로모 집행 장수가 정확히 역산된다.
+# 우리 페이지에서 누적을 숨겨도 마찬가지라, 표시/비표시의 양자택일이다.
+# 2026-08-28 사용자 결정: 공개(True). 프로모 집행 사실과 규모 노출을 감수한다.
+SHOW_ORGANIC = True
+# ── 흥행 기대 밴드 ────────────────────────────────────────────────────────────
+# 숫자를 여기에 손으로 적지 말 것. 출처는 그린랜드2 프로젝트의 comp 분석이고,
+# megabox_solo_band.json 이 유일한 진실이다(build_megabox_solo.py 실행 시 자동 갱신).
+# 손으로 옮겨 적으면 워페어 종영 등으로 comp 가 바뀔 때 반드시 드리프트한다.
+# 아래 상수는 교환 파일을 못 읽을 때만 쓰는 폴백이며, 그 경우 페이지에 기준일이 안 찍힌다.
+#
+# 파일은 이 리포 안에 커밋돼 있다(자립). 그린랜드2 분석을 돌리면 이 사본까지 같이 갱신되므로,
+# 평소에는 이 폴더만으로 작업하면 되고 그린랜드2 폴더가 없어도 동작한다.
+# 둘 다 있으면 더 최근 것을 쓴다 — 분석을 방금 돌렸는데 사본 커밋을 잊은 경우를 흡수한다.
+BAND_LOCAL = os.path.join(BASE, "megabox_solo_band.json")
+BAND_UPSTREAM = os.path.join(BASE, "..", "그린랜드2", "megabox_solo_band.json")
+
+
+def _band_path():
+    cands = [p for p in (BAND_LOCAL, BAND_UPSTREAM) if os.path.exists(p)]
+    return max(cands, key=os.path.getmtime) if cands else BAND_LOCAL
 BAND_LO, BAND_MID_LO, BAND_MID_HI, BAND_HIGH, BAND_CEIL = 15000, 20000, 25000, 34000, 63767
+BAND_SRC = ""      # 교환 파일에서 읽었을 때 기준일·표본수
+
+
+def load_band():
+    """교환 파일에서 밴드를 읽어 전역 상수를 덮어쓴다. 실패해도 폴백으로 진행."""
+    global BAND_LO, BAND_MID_LO, BAND_MID_HI, BAND_HIGH, BAND_CEIL, BAND_SRC
+    try:
+        with io.open(_band_path(), encoding="utf-8") as f:
+            d = json.load(f)
+        sc, ob, seg = d["scenario"], d["observed"], d["segment"]
+        BAND_LO = int(round(sc["low"] * 0.8, -3))     # 편성이 가정보다 좁을 때의 하방
+        BAND_MID_LO = int(round(sc["low"], -3))
+        BAND_MID_HI = int(round(sc["mid"], -3))
+        BAND_HIGH = int(round(sc["high"], -3))
+        BAND_CEIL = int(sc["ceiling"])
+        BAND_SRC = "comp {0}편 · {1} 기준".format(seg["n"], d["data_range"]["end"])
+        return d
+    except Exception as e:
+        print("  !! 밴드 교환 파일을 못 읽어 폴백 사용:", e)
+        return None
 
 
 def _num(s):
@@ -35,6 +76,7 @@ def _rows():
 
 
 def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
+    load_band()   # 밴드는 매 빌드마다 교환 파일에서 다시 읽는다
     rows = _rows()
     today = datetime.date.today()
     dday = (OPEN_DATE - today).days
@@ -74,7 +116,8 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
         promo_line = (f'<line x1="6" x2="{W-6}" y1="{promo_y:.1f}" y2="{promo_y:.1f}" '
                       f'stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 4" opacity=".6"/>'
                       f'<text x="{W-8}" y="{promo_y-4:.1f}" text-anchor="end" fill="var(--muted)" '
-                      f'font-size="10">프로모 {PROMO_BASE:,}</text>') if lo <= PROMO_BASE <= hi else ""
+                      f'font-size="10">프로모 {PROMO_BASE:,}</text>') if (
+            SHOW_ORGANIC and lo <= PROMO_BASE <= hi) else ""
         spark = (f'<svg viewBox="0 0 {W} {H}" width="100%" preserveAspectRatio="none" '
                  f'style="display:block;height:120px">'
                  f'<polyline points="{poly}" fill="none" stroke="var(--accent)" stroke-width="2.5" '
@@ -86,7 +129,12 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = _TPL
     html = html.replace("__DDAY__", ddtxt)
     html = html.replace("__BOOK__", f"{book:,}" if book else "—")
-    html = html.replace("__ORGANIC__", f"{organic:,}" if book else "—")
+    if SHOW_ORGANIC:
+        note = (f"이 중 실예매(프로모 {PROMO_BASE:,}장 제외) <b>{organic:,}명</b>"
+                if book else "이 중 실예매 —")
+    else:
+        note = "KOBIS 실시간 예매 기준 · 개봉일 이전 선예매 포함"
+    html = html.replace("__NOTE__", note)
     html = html.replace("__RATE__", rate or "—")
     html = html.replace("__RANK__", (f"{rank}위" if rank else "—"))
     html = html.replace("__CUM__", (f"{cum:,}" if cum else "—"))
@@ -94,8 +142,8 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__UPD__", upd or "수집 대기 중")
     html = (html.replace("__BLO__", f"{BAND_LO:,}").replace("__BHI__", f"{BAND_CEIL:,}")
             .replace("__BMIDLO__", f"{BAND_MID_LO:,}").replace("__BMIDHI__", f"{BAND_MID_HI:,}")
-            .replace("__BHIGH__", f"{BAND_HIGH:,}"))
-    html = html.replace("__PROMO__", f"{PROMO_BASE:,}")
+            .replace("__BHIGH__", f"{BAND_HIGH:,}")
+            .replace("__BSRC__", (" · " + BAND_SRC) if BAND_SRC else ""))
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
     return out_path
@@ -148,7 +196,7 @@ _TPL = """<!doctype html>
     <div class="card hero">
       <div class="k">예매 관객 (누적)</div>
       <div class="v">__BOOK__</div>
-      <div class="note">이 중 실예매(프로모 __PROMO__장 제외) <b>__ORGANIC__명</b></div>
+      <div class="note">__NOTE__</div>
     </div>
     <div class="card"><div class="k">예매율</div><div class="v">__RATE__</div></div>
     <div class="card"><div class="k">예매 순위</div><div class="v">__RANK__</div></div>
@@ -162,7 +210,7 @@ _TPL = """<!doctype html>
   <div class="panel">
     <h2>흥행 기대 밴드 (메가박스 단독개봉 comp)</h2>
     <div class="band"><span>하방 __BLO__</span><div class="bar"></div><span>최대 사례 __BHI__</span></div>
-    <div class="empty" style="padding:8px 0 0;text-align:left">중심 밴드 <b>__BMIDLO__–__BMIDHI__명</b> · 상방 시나리오 __BHIGH__ · 실사 외화 단독 최고 사례 __BHI__ · 개봉 후 실측으로 좁혀갑니다.</div>
+    <div class="empty" style="padding:8px 0 0;text-align:left">중심 밴드 <b>__BMIDLO__–__BMIDHI__명</b> · 상방 시나리오 __BHIGH__ · 실사 외화 단독 최고 사례 __BHI__ · 개봉 후 실측으로 좁혀갑니다__BSRC__.</div>
   </div>
 
   <div class="foot"><span class="dot"></span>1시간 단위 자동 갱신 · 마지막 갱신 __UPD__</div>
