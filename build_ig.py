@@ -98,33 +98,36 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
                 series.append((r[0][5:16], b))
     organic = max(0, (book or 0) - PROMO_BASE)
 
-    # 스파크라인(예매관객 추세) — 인라인 SVG
+    # 시간당 예매 순증(구간별 net add) — 막대. 누적은 히어로에 있으니 여기선 증가분만.
+    # 순증(예매 유입)은 위로, 순감(취소 등)은 아래로, 0 기준선 대비.
     spark = ""
-    if len(series) >= 2:
-        ys = [v for _, v in series]
-        lo, hi = min(ys), max(ys)
-        rng = (hi - lo) or 1
-        W, H = 680, 120
-        pts = []
-        for i, (_, v) in enumerate(series):
-            x = 6 + i * (W - 12) / (len(series) - 1)
-            y = H - 10 - (v - lo) / rng * (H - 24)
-            pts.append(f"{x:.1f},{y:.1f}")
-        poly = " ".join(pts)
-        # 프로모 baseline 라인
-        promo_y = H - 10 - (PROMO_BASE - lo) / rng * (H - 24)
-        promo_line = (f'<line x1="6" x2="{W-6}" y1="{promo_y:.1f}" y2="{promo_y:.1f}" '
-                      f'stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 4" opacity=".6"/>'
-                      f'<text x="{W-8}" y="{promo_y-4:.1f}" text-anchor="end" fill="var(--muted)" '
-                      f'font-size="10">프로모 {PROMO_BASE:,}</text>') if (
-            SHOW_ORGANIC and lo <= PROMO_BASE <= hi) else ""
-        spark = (f'<svg viewBox="0 0 {W} {H}" width="100%" preserveAspectRatio="none" '
-                 f'style="display:block;height:120px">'
-                 f'<polyline points="{poly}" fill="none" stroke="var(--accent)" stroke-width="2.5" '
-                 f'stroke-linejoin="round" stroke-linecap="round"/>'
-                 f'{promo_line}'
-                 f'<circle cx="{pts[-1].split(",")[0]}" cy="{pts[-1].split(",")[1]}" r="4" fill="var(--accent)"/>'
-                 f'</svg>')
+    deltas = [(series[i][0], series[i][1] - series[i - 1][1]) for i in range(1, len(series))]
+    if deltas:
+        W, H, PAD = 680, 120, 16
+        dmax = max(d for _, d in deltas)
+        dmin = min(d for _, d in deltas)
+        hi, lo = max(dmax, 0), min(dmin, 0)
+        span = (hi - lo) or 1
+        plot_h = H - 2 * PAD
+        y0 = PAD + (hi / span) * plot_h          # 0 기준선(순감 있으면 자동으로 위로 올라감)
+        bw = (W - 12) / len(deltas)
+        bars = []
+        for i, (_, d) in enumerate(deltas):
+            x = 6 + i * bw + bw * 0.16
+            bh = abs(d) / span * plot_h
+            if d >= 0:
+                bars.append(f'<rect x="{x:.1f}" y="{y0 - bh:.1f}" width="{bw * 0.68:.1f}" '
+                            f'height="{bh:.1f}" rx="1.5" fill="var(--accent)"/>')
+            else:
+                bars.append(f'<rect x="{x:.1f}" y="{y0:.1f}" width="{bw * 0.68:.1f}" '
+                            f'height="{bh:.1f}" rx="1.5" fill="#e06a6a" opacity=".85"/>')
+        zero = (f'<line x1="6" x2="{W - 6}" y1="{y0:.1f}" y2="{y0:.1f}" '
+                f'stroke="var(--line)" stroke-width="1"/>')
+        lastd = deltas[-1][1]
+        badge = (f'<text x="{W - 8}" y="13" text-anchor="end" fill="var(--muted)" '
+                 f'font-size="11">최근 구간 {lastd:+,}</text>')
+        spark = (f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block;height:120px">'
+                 f'{zero}{"".join(bars)}{badge}</svg>')
 
     html = _TPL
     html = html.replace("__DDAY__", ddtxt)
@@ -203,7 +206,7 @@ _TPL = """<!doctype html>
   </div>
 
   <div class="panel">
-    <h2>예매 관객 추세</h2>
+    <h2>시간당 예매 순증 (구간별 증가분)</h2>
     __SPARK__
   </div>
 
