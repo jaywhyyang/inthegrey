@@ -101,12 +101,13 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     # 시간당 예매 순증(구간별 net add) — 막대 + 값/시각 라벨 + 마우스오버 툴팁.
     # 순증(예매 유입)은 위(파랑), 순감(취소 등)은 아래(빨강), 0 기준선 대비. 누적은 히어로에 있음.
     spark = ""
-    deltas = [(series[i][0], series[i][1] - series[i - 1][1]) for i in range(1, len(series))]
+    # (시각, 순증, 그 시점 누적)
+    deltas = [(series[i][0], series[i][1] - series[i - 1][1], series[i][1]) for i in range(1, len(series))]
     if deltas:
         n = len(deltas)
-        W, H, PT, PB = 680, 152, 26, 22
-        dmax = max(d for _, d in deltas)
-        dmin = min(d for _, d in deltas)
+        W, H, PT, PB = 680, 164, 26, 34
+        dmax = max(d for _, d, _c in deltas)
+        dmin = min(d for _, d, _c in deltas)
         hi, lo = max(dmax, 0), min(dmin, 0)
         span = (hi - lo) or 1
         plot_h = H - PT - PB
@@ -114,22 +115,25 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
         bw = (W - 12) / n
         step = max(1, (n + 13) // 14)             # 라벨 과밀 방지(항상 보이는 값은 최대 ~14개, 툴팁은 전부)
         parts = [f'<line x1="6" x2="{W-6}" y1="{y0:.1f}" y2="{y0:.1f}" stroke="var(--line)" stroke-width="1"/>']
-        for i, (t, d) in enumerate(deltas):
+        for i, (t, d, cum_i) in enumerate(deltas):
             cx = 6 + i * bw
             x = cx + bw * 0.16
             bh = abs(d) / span * plot_h
             by = (y0 - bh) if d >= 0 else y0
             col = "var(--accent)" if d >= 0 else "#e06a6a"
             parts.append(f'<rect x="{x:.1f}" y="{by:.1f}" width="{bw*0.68:.1f}" height="{max(bh,0.8):.1f}" '
-                         f'rx="1.5" fill="{col}"><title>{t} · 순증 {d:+,}</title></rect>')
+                         f'rx="1.5" fill="{col}"><title>{t} · 순증 {d:+,} · 누적 {cum_i:,}</title></rect>')
             if i % step == 0 or i == n - 1:
-                ly = (by - 4) if d >= 0 else (by + bh + 11)   # 값 라벨(막대 위/아래)
-                parts.append(f'<text x="{cx + bw/2:.1f}" y="{ly:.1f}" text-anchor="middle" '
+                mid = cx + bw / 2
+                ly = (by - 4) if d >= 0 else (by + bh + 11)                       # 순증(막대 위/아래)
+                parts.append(f'<text x="{mid:.1f}" y="{ly:.1f}" text-anchor="middle" '
                              f'fill="var(--ink)" font-size="10.5" font-weight="700">{d:+,}</text>')
-                parts.append(f'<text x="{cx + bw/2:.1f}" y="{H-7:.1f}" text-anchor="middle" '
-                             f'fill="var(--muted)" font-size="9.5">{t[6:]}</text>')   # 시각 라벨(HH:MM)
+                parts.append(f'<text x="{mid:.1f}" y="{H-20:.1f}" text-anchor="middle" '     # 그 시점 누적
+                             f'fill="var(--muted)" font-size="10" font-weight="600">{cum_i:,}</text>')
+                parts.append(f'<text x="{mid:.1f}" y="{H-7:.1f}" text-anchor="middle" '        # 시각(HH:MM)
+                             f'fill="var(--muted)" font-size="9">{t[6:]}</text>')
         badge = (f'<text x="{W-8}" y="13" text-anchor="end" fill="var(--muted)" font-size="11">'
-                 f'최근 {deltas[-1][0]} · {deltas[-1][1]:+,}</text>')
+                 f'최근 {deltas[-1][0]} · {deltas[-1][1]:+,} → 누적 {deltas[-1][2]:,}</text>')
         spark = (f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block;height:auto;overflow:visible">'
                  f'{"".join(parts)}{badge}</svg>')
 
@@ -210,7 +214,7 @@ _TPL = """<!doctype html>
   </div>
 
   <div class="panel">
-    <h2>시간당 예매 순증 (구간별 증가분)</h2>
+    <h2>시간당 예매 순증 (막대=순증분 · 아래=그 시점 누적)</h2>
     __SPARK__
   </div>
 
