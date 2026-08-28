@@ -3,7 +3,7 @@
   "generated_from": "build_megabox_solo.py → megabox_solo_final.csv",
   "data_range": {
     "start": "2023-01-09",
-    "end": "2026-08-26"
+    "end": "2026-08-28"
   },
   "segment": {
     "label": "실사 외화 × 메가박스 150관 이상 (일본 제외)",
@@ -13,7 +13,7 @@
   },
   "observed": {
     "max": 63767,
-    "min": 17119,
+    "min": 18000,
     "median": 20138,
     "p25": 18670,
     "p75": 21014,
@@ -22,30 +22,30 @@
     "sell_rate_median": 0.0842
   },
   "scenario": {
-    "low": 19200.0,
-    "mid": 24500.0,
-    "high": 34400.0,
+    "low": 17400.0,
+    "mid": 22200.0,
+    "high": 31300.0,
     "ceiling": 63767,
     "assumptions": {
-      "opening_seats": 50000,
+      "opening_seats": 45000,
       "sell_rates": {
         "low": 0.066,
         "mid": 0.085,
         "high": 0.121
       },
-      "note": "scenario 는 개봉일 좌석 50,000석 가정 위의 값이다. 편성이 이보다 좁으면 한 단계 낮춰 읽을 것. ceiling 은 장르 무관 실사 외화 단독 최고 실측치이며, 액션·범죄로 좁히면 역대 최고는 21,014(워킹맨)이다."
+      "note": "scenario 는 개봉일 좌석 45,000석 가정 위의 값이다. 편성이 이보다 좁으면 한 단계 낮춰 읽을 것. ceiling 은 장르 무관 실사 외화 단독 최고 실측치이며, 액션·범죄로 좁히면 역대 최고는 21,014(워킹맨)이다."
     }
   },
   "model": {
     "form": "ln(final) = a + b * ln(opening_admissions)",
-    "a": 2.0749,
-    "b": 0.9614,
-    "r2": 0.609,
-    "resid_sd": 0.552,
+    "a": 2.0576,
+    "b": 0.964,
+    "r2": 0.611,
+    "resid_sd": 0.551,
     "n": 28,
     "interval_68": [
       0.576,
-      1.736
+      1.735
     ],
     "fit_on": "실사 외화 신작 단독개봉(일본 제외) 전체"
   },
@@ -110,7 +110,7 @@
       "screens": 188,
       "opening_seats": 45012,
       "opening_aud": 3815,
-      "final": 17119,
+      "final": 18000,
       "status": "상영중(잠정)"
     }
   ],
