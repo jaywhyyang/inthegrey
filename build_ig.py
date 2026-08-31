@@ -75,6 +75,48 @@ def _rows():
     return [r for r in rd[1:] if r and len(r) >= 8 and r[1]]  # 순위 있는 유효행
 
 
+def _ai_comment():
+    """ai_comment.json(진단)을 읽어 상단 코멘트 박스 HTML. 없으면 빈 문자열."""
+    try:
+        d = json.load(io.open(os.path.join(BASE, "ai_comment.json"), encoding="utf-8"))
+    except Exception:
+        return ""
+    text = (d.get("text") or "").strip()
+    if not text:
+        return ""
+    body = "".join(f"<p>{ln}</p>" for ln in text.split("\n") if ln.strip())
+    watch = (d.get("watch") or "").strip()
+    wh = f'<div class="watch"><b>관전 포인트</b> {watch}</div>' if watch else ""
+    return (f'<div class="diag"><div class="dh">🔎 지금 진단<span>{d.get("updated","")}</span></div>'
+            f'{body}{wh}</div>')
+
+
+def _coopen_section(open_date="2026-09-02"):
+    """같은 날(9/2) 개봉작 예매 비교 — competitors_hourly.csv 최신 스냅샷."""
+    try:
+        rows = list(csv.reader(io.open(os.path.join(BASE, "competitors_hourly.csv"), encoding="utf-8-sig")))
+    except Exception:
+        return ""
+    if len(rows) < 2:
+        return ""
+    ts = rows[-1][0]
+    field = [x for x in rows[1:] if x and x[0] == ts and len(x) >= 7]
+    same = [(x[2], _num(x[5]) or 0, x[4], x[1]) for x in field if open_date in (x[3] or "")]
+    if not same:
+        return ""
+    same.sort(key=lambda z: -z[1])
+    mx = max(b for _, b, _, _ in same) or 1
+    lis = []
+    for nm, bk, rt, rk in same:
+        me = "그레이" in nm
+        lis.append(f'<div class="cmp{" me" if me else ""}"><div class="cn">{nm[:22]}{" ★" if me else ""}</div>'
+                   f'<div class="cbar"><i style="width:{bk / mx * 100:.0f}%"></i></div>'
+                   f'<div class="cv">{bk:,}<span>{rt}</span></div></div>')
+    return (f'<div class="panel"><h2>9/2 동시개봉작 예매 비교 (같은 날 {len(same)}편)</h2>{"".join(lis)}'
+            f'<div class="empty" style="padding:10px 0 0;text-align:left">막대=예매관객 · 우측=예매율 · '
+            f'★ 인 더 그레이. 같은 날 스크린·주목도를 나눠 갖는 직접 경쟁작입니다.</div></div>')
+
+
 def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     load_band()   # 밴드는 매 빌드마다 교환 파일에서 다시 읽는다
     rows = _rows()
@@ -150,6 +192,8 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__RANK__", (f"{rank}위" if rank else "—"))
     html = html.replace("__CUM__", (f"{cum:,}" if cum else "—"))
     html = html.replace("__SPARK__", spark or '<div class="empty">예매 추세는 수집이 몇 시간 쌓이면 표시됩니다</div>')
+    html = html.replace("__COMMENT__", _ai_comment())
+    html = html.replace("__COOPEN__", _coopen_section())
     html = html.replace("__UPD__", upd or "수집 대기 중")
     html = (html.replace("__BLO__", f"{BAND_LO:,}").replace("__BHI__", f"{BAND_CEIL:,}")
             .replace("__BMIDLO__", f"{BAND_MID_LO:,}").replace("__BMIDHI__", f"{BAND_MID_HI:,}")
@@ -195,6 +239,23 @@ _TPL = """<!doctype html>
   .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good);margin-right:6px;
     box-shadow:0 0 0 0 rgba(74,222,128,.5);animation:b 2.4s infinite}
   @keyframes b{70%{box-shadow:0 0 0 7px rgba(74,222,128,0)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
+  .diag{background:linear-gradient(135deg,#20263a 0%,#171b24 75%);border:1px solid #33406a;
+    border-radius:16px;padding:18px 20px;margin-top:12px}
+  .diag .dh{font-weight:750;font-size:14px;color:#aab6ff;margin-bottom:8px;display:flex;
+    justify-content:space-between;align-items:baseline}
+  .diag .dh span{font-size:11px;color:var(--muted);font-weight:400}
+  .diag p{font-size:14px;line-height:1.75;margin:.35em 0;color:var(--ink)}
+  .diag .watch{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+  .diag .watch b{color:#8b9dff}
+  .cmp{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px}
+  .cmp .cn{width:150px;flex:none;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cmp .cbar{flex:1;height:14px;background:rgba(255,255,255,.05);border-radius:7px;overflow:hidden}
+  .cmp .cbar i{display:block;height:100%;background:#3a4260;border-radius:7px}
+  .cmp .cv{width:82px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+  .cmp .cv span{color:var(--muted);font-size:11px;margin-left:4px}
+  .cmp.me .cn{color:var(--ink);font-weight:750}
+  .cmp.me .cbar i{background:linear-gradient(90deg,#8b9dff,#5f7bff)}
+  .cmp.me .cv{color:#aab6ff;font-weight:750}
 </style></head>
 <body><div class="wrap">
   <div class="top">
@@ -213,10 +274,14 @@ _TPL = """<!doctype html>
     <div class="card"><div class="k">예매 순위</div><div class="v">__RANK__</div></div>
   </div>
 
+  __COMMENT__
+
   <div class="panel">
     <h2>시간당 예매 순증 (막대=순증분 · 아래=그 시점 누적)</h2>
     __SPARK__
   </div>
+
+  __COOPEN__
 
   <div class="panel">
     <h2>흥행 기대 밴드 (메가박스 단독개봉 comp)</h2>
