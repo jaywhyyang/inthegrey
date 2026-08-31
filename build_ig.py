@@ -203,12 +203,22 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
         bw = (W - 12) / n
         step = max(1, (n + 13) // 14)             # 라벨 과밀 방지(항상 보이는 값은 최대 ~14개, 툴팁은 전부)
         parts = [f'<line x1="6" x2="{W-6}" y1="{y0:.1f}" y2="{y0:.1f}" stroke="var(--line)" stroke-width="1"/>']
+        prev_day = None
+        prev_lbl_day = None
         for i, (t, d, cum_i) in enumerate(deltas):
             cx = 6 + i * bw
             x = cx + bw * 0.16
             bh = abs(d) / span * plot_h
             by = (y0 - bh) if d >= 0 else y0
             col = "var(--accent)" if d >= 0 else "#e06a6a"
+            day_i = t[:5]                                      # 'MM-DD'
+            if prev_day is not None and day_i != prev_day:     # 날짜 경계: 세로 구분선 + 날짜
+                _m, _dd = day_i.split("-")
+                parts.append(f'<line x1="{cx:.1f}" x2="{cx:.1f}" y1="{PT-10:.1f}" y2="{H-PB+8:.1f}" '
+                             f'stroke="var(--muted)" stroke-width="1" stroke-dasharray="2 3" opacity=".55"/>')
+                parts.append(f'<text x="{cx+3:.1f}" y="{PT-1:.1f}" fill="var(--muted)" font-size="9.5" '
+                             f'font-weight="700">{int(_m)}/{int(_dd)}</text>')
+            prev_day = day_i
             parts.append(f'<rect x="{x:.1f}" y="{by:.1f}" width="{bw*0.68:.1f}" height="{max(bh,0.8):.1f}" '
                          f'rx="1.5" fill="{col}"><title>{t} · 순증 {d:+,} · 누적 {cum_i:,}</title></rect>')
             if i % step == 0 or i == n - 1:
@@ -218,8 +228,11 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
                              f'fill="var(--ink)" font-size="10.5" font-weight="700">{d:+,}</text>')
                 parts.append(f'<text x="{mid:.1f}" y="{H-20:.1f}" text-anchor="middle" '     # 그 시점 누적
                              f'fill="var(--muted)" font-size="10" font-weight="600">{cum_i:,}</text>')
-                parts.append(f'<text x="{mid:.1f}" y="{H-7:.1f}" text-anchor="middle" '        # 시각(HH:MM)
-                             f'fill="var(--muted)" font-size="9">{t[6:]}</text>')
+                _m, _dd = day_i.split("-")
+                tlbl = (f"{int(_m)}/{int(_dd)} " if day_i != prev_lbl_day else "") + t[6:]  # 날짜 바뀌면 M/D 병기
+                prev_lbl_day = day_i
+                parts.append(f'<text x="{mid:.1f}" y="{H-7:.1f}" text-anchor="middle" '        # 시각(M/D HH:MM)
+                             f'fill="var(--muted)" font-size="9">{tlbl}</text>')
         badge = (f'<text x="{W-8}" y="13" text-anchor="end" fill="var(--muted)" font-size="11">'
                  f'최근 {deltas[-1][0]} · {deltas[-1][1]:+,} → 누적 {deltas[-1][2]:,}</text>')
         spark = (f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block;height:auto;overflow:visible">'
