@@ -91,30 +91,76 @@ def _ai_comment():
             f'{body}{wh}</div>')
 
 
+def _mini_spark(series, color="var(--muted)", W=132, H=26):
+    """작품별 예매 추세 미니 스파크라인(자기 min~max로 정규화)."""
+    ys = [v for _, v in series]
+    if len(ys) < 2:
+        return f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block;height:26px"></svg>'
+    lo, hi = min(ys), max(ys)
+    rng = (hi - lo) or 1
+    pts = [f"{2 + i*(W-4)/(len(ys)-1):.1f},{H-3 - (v-lo)/rng*(H-6):.1f}" for i, v in enumerate(ys)]
+    lx, ly = pts[-1].split(",")
+    return (f'<svg viewBox="0 0 {W} {H}" width="100%" preserveAspectRatio="none" style="display:block;height:26px">'
+            f'<polyline points="{" ".join(pts)}" fill="none" stroke="{color}" stroke-width="1.6"/>'
+            f'<circle cx="{lx}" cy="{ly}" r="2.2" fill="{color}"/></svg>')
+
+
 def _coopen_section(open_date="2026-09-02"):
-    """같은 날(9/2) 개봉작 예매 비교 — competitors_hourly.csv 최신 스냅샷."""
+    """같은 날(9/2) 개봉작 예매 '증가 추세' — competitors_hourly.csv 전체 시계열."""
+    import datetime as _dt
     try:
         rows = list(csv.reader(io.open(os.path.join(BASE, "competitors_hourly.csv"), encoding="utf-8-sig")))
     except Exception:
         return ""
-    if len(rows) < 2:
+    data = [x for x in rows[1:] if x and len(x) >= 7]
+    if not data:
         return ""
-    ts = rows[-1][0]
-    field = [x for x in rows[1:] if x and x[0] == ts and len(x) >= 7]
-    same = [(x[2], _num(x[5]) or 0, x[4], x[1]) for x in field if open_date in (x[3] or "")]
-    if not same:
+    ts_latest = data[-1][0]
+    latest = {x[2]: x for x in data if x[0] == ts_latest and open_date in (x[3] or "")}
+    if not latest:
         return ""
-    same.sort(key=lambda z: -z[1])
-    mx = max(b for _, b, _, _ in same) or 1
+
+    def parse(t):
+        try:
+            return _dt.datetime.strptime(t, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+
+    items = []
+    for nm, x in latest.items():
+        s = [(r[0], _num(r[5]) or 0) for r in data if r[2] == nm and _num(r[5]) is not None]
+        cur = _num(x[5]) or 0
+        g = None
+        tl = parse(s[-1][0]) if s else None
+        if tl and len(s) >= 2:
+            ago = tl - _dt.timedelta(hours=24)
+            prev = None
+            for t, v in s:
+                pt = parse(t)
+                if pt and pt <= ago:
+                    prev = v
+            if prev is None:
+                prev = s[0][1]                # 24h 데이터 없으면 최초 관측값 대비
+            g = cur - prev
+        items.append((nm, cur, x[4], g, s))
+    items.sort(key=lambda z: -z[1])
     lis = []
-    for nm, bk, rt, rk in same:
+    for nm, cur, rt, g, s in items:
         me = "그레이" in nm
-        lis.append(f'<div class="cmp{" me" if me else ""}"><div class="cn">{nm[:22]}{" ★" if me else ""}</div>'
-                   f'<div class="cbar"><i style="width:{bk / mx * 100:.0f}%"></i></div>'
-                   f'<div class="cv">{bk:,}<span>{rt}</span></div></div>')
-    return (f'<div class="panel"><h2>9/2 동시개봉작 예매 비교 (같은 날 {len(same)}편)</h2>{"".join(lis)}'
-            f'<div class="empty" style="padding:10px 0 0;text-align:left">막대=예매관객 · 우측=예매율 · '
-            f'★ 인 더 그레이. 같은 날 스크린·주목도를 나눠 갖는 직접 경쟁작입니다.</div></div>')
+        spark = _mini_spark(s, "var(--accent)" if me else "var(--muted)")
+        if g is None:
+            gtxt = ""
+        elif g >= 0:
+            gtxt = f'<span class="g">+{g:,}</span>'
+        else:
+            gtxt = f'<span class="g dn">{g:,}</span>'
+        lis.append(f'<div class="cmp{" me" if me else ""}">'
+                   f'<div class="cn">{nm[:18]}{" ★" if me else ""}</div>'
+                   f'<div class="csp">{spark}</div>'
+                   f'<div class="cv">{cur:,}{gtxt}</div></div>')
+    return (f'<div class="panel"><h2>9/2 동시개봉작 예매 증가 추세 (같은 날 {len(items)}편)</h2>{"".join(lis)}'
+            f'<div class="empty" style="padding:10px 0 0;text-align:left">선=각 작품 예매 추세(수집 시작~현재) · '
+            f'우측=현재 예매관객(+지난 24h 증가) · ★ 인 더 그레이. 같은 날 스크린·주목도를 나눠 갖는 직접 경쟁작입니다.</div></div>')
 
 
 def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
@@ -249,12 +295,13 @@ _TPL = """<!doctype html>
   .diag .watch b{color:#8b9dff}
   .cmp{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px}
   .cmp .cn{width:150px;flex:none;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .cmp .cbar{flex:1;height:14px;background:rgba(255,255,255,.05);border-radius:7px;overflow:hidden}
-  .cmp .cbar i{display:block;height:100%;background:#3a4260;border-radius:7px}
-  .cmp .cv{width:82px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
-  .cmp .cv span{color:var(--muted);font-size:11px;margin-left:4px}
+  .cmp .csp{flex:1;min-width:80px;opacity:.75}
+  .cmp .cv{width:96px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+  .cmp .cv .g{display:inline-block;margin-left:5px;font-size:10.5px;color:var(--good);font-weight:600}
+  .cmp .cv .g.dn{color:#e06a6a}
+  .cmp.me{background:rgba(139,157,255,.06);border-radius:10px;padding:4px 8px;margin-left:-8px;margin-right:-8px}
   .cmp.me .cn{color:var(--ink);font-weight:750}
-  .cmp.me .cbar i{background:linear-gradient(90deg,#8b9dff,#5f7bff)}
+  .cmp.me .csp{opacity:1}
   .cmp.me .cv{color:#aab6ff;font-weight:750}
 </style></head>
 <body><div class="wrap">
