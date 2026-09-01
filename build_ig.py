@@ -163,6 +163,60 @@ def _coopen_section(open_date="2026-09-02"):
             f'우측=현재 예매관객(+지난 24h 증가) · ★ 인 더 그레이. 같은 날 스크린·주목도를 나눠 갖는 직접 경쟁작입니다.</div></div>')
 
 
+def _eod_forecast():
+    """오늘 마감(23:59) 예매관객 역산 — 최근 완주일들의 '현재 시각까지 붙는 비율'로 오늘 총증가 추정."""
+    import statistics as _st
+    from collections import defaultdict
+    rows = _rows()
+    series = [(r[0], _num(r[7]) or 0) for r in rows if len(r) > 7 and _num(r[7]) is not None]
+    if len(series) < 4:
+        return None
+    day = defaultdict(list)
+    for ts, b in series:
+        day[ts[:10]].append((ts[11:16], b))
+    days = sorted(day)
+    if len(days) < 2:
+        return None
+    today = days[-1]
+    now_hm = day[today][-1][0]
+    tstart = day[today][0][1]
+    now = day[today][-1][1]
+    add_so_far = now - tstart
+    fracs = []
+    for d in days[:-1]:                       # 완주일(어제까지)
+        s = day[d]
+        full = s[-1][1] - s[0][1]
+        if full <= 0:
+            continue
+        byn = s[0][1]
+        for t, b in s:
+            if t <= now_hm:
+                byn = b
+        fr = (byn - s[0][1]) / full
+        if 0.02 <= fr <= 1.0:
+            fracs.append(fr)
+    if not fracs or add_so_far <= 0:
+        return None
+    frm = _st.median(fracs)
+    eod = tstart + add_so_far / frm
+    lo = tstart + add_so_far / max(fracs)     # 높은 비율일수록 낮은 예측
+    hi = tstart + add_so_far / min(fracs)
+    return {"eod": int(round(eod)), "lo": int(round(lo)), "hi": int(round(hi)),
+            "cur": now, "add": add_so_far, "now_hm": now_hm, "n": len(fracs)}
+
+
+def _eod_card():
+    f = _eod_forecast()
+    if not f:
+        return ""
+    org = f["eod"] - PROMO_BASE
+    sub = (f'현재 {f["cur"]:,} · 오늘 +{f["add"]:,} · 최근 {f["n"]}일 시간대 패턴 역산'
+           + (f' · 실예매 ~{org:,}' if SHOW_ORGANIC else ''))
+    return (f'<div class="eod"><div class="eodh">📈 오늘 마감 예매 예측<span>{f["now_hm"]} 기준</span></div>'
+            f'<div class="eodv">약 {f["eod"]:,}<small>명 ({f["lo"]:,}~{f["hi"]:,})</small></div>'
+            f'<div class="eodn">{sub}</div></div>')
+
+
 def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     load_band()   # 밴드는 매 빌드마다 교환 파일에서 다시 읽는다
     rows = _rows()
@@ -251,6 +305,7 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__RANK__", (f"{rank}위" if rank else "—"))
     html = html.replace("__CUM__", (f"{cum:,}" if cum else "—"))
     html = html.replace("__SPARK__", spark or '<div class="empty">예매 추세는 수집이 몇 시간 쌓이면 표시됩니다</div>')
+    html = html.replace("__EODCARD__", _eod_card())
     html = html.replace("__COMMENT__", _ai_comment())
     html = html.replace("__COOPEN__", _coopen_section())
     html = html.replace("__UPD__", upd or "수집 대기 중")
@@ -298,6 +353,14 @@ _TPL = """<!doctype html>
   .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good);margin-right:6px;
     box-shadow:0 0 0 0 rgba(74,222,128,.5);animation:b 2.4s infinite}
   @keyframes b{70%{box-shadow:0 0 0 7px rgba(74,222,128,0)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
+  .eod{background:linear-gradient(135deg,#152a20 0%,#171b24 78%);border:1px solid #2f5b45;
+    border-radius:16px;padding:16px 20px;margin-top:12px}
+  .eod .eodh{font-weight:750;font-size:13px;color:#7ee0a8;display:flex;justify-content:space-between;
+    align-items:baseline;margin-bottom:6px}
+  .eod .eodh span{font-size:11px;color:var(--muted);font-weight:400}
+  .eod .eodv{font-size:34px;font-weight:850;letter-spacing:-.02em;color:#a8f0c6;font-variant-numeric:tabular-nums}
+  .eod .eodv small{font-size:14px;font-weight:600;color:var(--muted)}
+  .eod .eodn{font-size:12px;color:var(--muted);margin-top:5px}
   .diag{background:linear-gradient(135deg,#20263a 0%,#171b24 75%);border:1px solid #33406a;
     border-radius:16px;padding:18px 20px;margin-top:12px}
   .diag .dh{font-weight:750;font-size:14px;color:#aab6ff;margin-bottom:8px;display:flex;
@@ -333,6 +396,8 @@ _TPL = """<!doctype html>
     <div class="card"><div class="k">예매율</div><div class="v">__RATE__</div></div>
     <div class="card"><div class="k">예매 순위</div><div class="v">__RANK__</div></div>
   </div>
+
+  __EODCARD__
 
   __COMMENT__
 
