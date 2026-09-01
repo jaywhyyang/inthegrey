@@ -18,7 +18,7 @@ import member_ingest as MI
 BASE = "https://www.kobis.or.kr"
 DIR = os.path.dirname(os.path.abspath(__file__))
 LOGIN_FILE = os.path.join(DIR, "kobis_login.txt")
-MOVIE_CD = "20264056"  # 그린랜드 2: 마이그레이션
+MOVIE_CD = "20265573"  # 인 더 그레이 (KOBIS 영화코드)
 
 
 def _creds():
@@ -93,7 +93,7 @@ def main():
             MI.append_snapshot(summary, ts)
             print(f"요약 저장 {ts} | 관객 {summary['관객수']} | 누적 {summary['누적관객수']} | 무료 {summary['무료관객수']}")
         else:
-            print("요약: 그린랜드2 행 없음")
+            print("요약: 인 더 그레이 행 없음(개봉 전/상영 없음)")
     except Exception as e:
         print("요약 수집 실패:", e)
 
@@ -130,14 +130,14 @@ def main():
     except Exception as e:
         print("편성 반영 건너뜀:", e)
     try:
-        import build_dashboard
+        import build_ig as build_dashboard
         build_dashboard.generate()
         print("대시보드 갱신")
     except Exception as e:
         print("대시보드 건너뜀:", e)
     try:
-        import kobis_greenland2
-        kobis_greenland2.publish_to_github(ts)
+        import kobis_realtime
+        kobis_realtime.publish_to_github(ts)
     except Exception as e:
         print("publish 건너뜀:", e)
     return 0

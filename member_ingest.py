@@ -18,7 +18,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 DOWNLOADS = os.path.join(os.path.expanduser("~"), "Downloads")
 SNAP_CSV = os.path.join(BASE, "member_snapshots.csv")
 DETAIL_JSON = os.path.join(BASE, "member_detail.json")
-MOVIE_KEYWORD = "그린랜드 2"
+MOVIE_KEYWORD = "인 더 그레이"
 
 DETAIL_HISTORY = os.path.join(BASE, "member_detail_history.json")
 SNAP_HEADER = ["수집시각", "날짜", "관객수", "누적관객수", "무료관객수",
@@ -86,11 +86,14 @@ def parse_detail(path):
 def aggregate_detail(cellrows):
     """상세 셀행(list of cell-lists) → 극장/지역/체인/회차 집계."""
     by_theater, by_region, by_screen = {}, {}, {}
-    by_slot = [0] * 7  # 1회~7회 관객 합
-    by_theater_slot = {}  # 극장 → [1회~7회 관객] (지점×시간대 크로스; 과거엔 미보존이라 오늘부터 적재)
+    # 회차(시간대) 컬럼 수는 그날 최대 상영횟수에 따라 가변 → 리스트를 동적으로 늘린다.
+    # 컬럼 고정 위치: [0]날짜 [1]지역 [2]극장 [3]상영관 [4]좌석 [5]발권금액 [6]전체매출 [7]전체관객
+    #                이후 (매출,관객) 쌍이 회차별로 반복 → 회차 관객 = idx 9,11,13,...
+    by_slot = []          # 1회·2회·… 전체 관객 합 (길이=그날 최대 회차)
+    by_theater_slot = {}  # 극장 → [1회~N회 관객] (지점×시간대 크로스 히트맵)
     total = 0
     for d in cellrows:
-        if len(d) < 22 or not re.match(r"^\d{4}", str(d[0])):  # 20260701 / 2026-07-01 둘다
+        if len(d) < 8 or not re.match(r"^\d{4}", str(d[0])):  # 20260701 / 2026-07-01 둘다
             continue
         region, theater, screen, seats = d[1], d[2], d[3], _num(d[4])
         aud_total = _num(d[7]) or 0           # 전체 관객수
@@ -101,12 +104,16 @@ def aggregate_detail(cellrows):
         key = f"{theater} | {screen}"
         s = by_screen.setdefault(key, {"관객": 0, "좌석": seats or 0, "region": region})
         s["관객"] += aud_total
-        # 회차별 관객: col9,11,13,15,17,19,21 = 1~7회 관객수
-        tslot = by_theater_slot.setdefault(theater, [0] * 7)
-        for i, col in enumerate(range(9, 22, 2)):
+        # 회차별 관객: idx 9,11,13,… (컬럼 끝까지, 회차수 가변)
+        tslot = by_theater_slot.setdefault(theater, [])
+        for i, col in enumerate(range(9, len(d), 2)):
             v = _num(d[col]) or 0
+            while len(by_slot) <= i:
+                by_slot.append(0)
+            while len(tslot) <= i:
+                tslot.append(0)
             by_slot[i] += v
-            tslot[i] += v            # 지점별 회차 관객 크로스 보존
+            tslot[i] += v            # 지점별 회차(시간대) 관객 크로스 보존
     # 체인별 집계 (상영관수/좌석수/관객) — 상영관 단위로 중복 없이
     def chain_of(name):
         if "CGV" in name:
@@ -138,8 +145,12 @@ def aggregate_detail(cellrows):
         scr_per_theater[th] = scr_per_theater.get(th, 0) + 1
     top_theaters = [[name, aud, scr_per_theater.get(name, 0)]
                     for name, aud in sorted(by_theater.items(), key=lambda x: x[1], reverse=True)[:50]]
-    # 지점×시간대 크로스: 상위 극장에 한해 [1회~7회] 관객 (히트맵용)
-    theater_slots = {name: by_theater_slot.get(name, [0] * 7) for name, _, _ in top_theaters}
+    # 지점×시간대 크로스: 상위 극장에 한해 [1회~N회] 관객 (히트맵용, 회차수 맞춰 0패딩)
+    nslot = len(by_slot)
+    theater_slots = {}
+    for name, _, _ in top_theaters:
+        row = by_theater_slot.get(name, [])
+        theater_slots[name] = row + [0] * (nslot - len(row))
     # regions: [지역, 관객, 좌석, 좌석점유율%]
     regions = sorted(
         ([r, by_region[r], region_seats.get(r, 0),
