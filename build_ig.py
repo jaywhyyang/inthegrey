@@ -163,6 +163,115 @@ def _coopen_section(open_date="2026-09-02"):
             f'우측=현재 예매관객(+지난 24h 증가) · ★ 인 더 그레이. 같은 날 스크린·주목도를 나눠 갖는 직접 경쟁작입니다.</div></div>')
 
 
+MEMBER_DETAIL = os.path.join(BASE, "member_detail.json")
+MEMBER_SNAP = os.path.join(BASE, "member_snapshots.csv")
+
+
+def _member_summary():
+    """member_snapshots.csv 최신 행 → 오늘/누적 관객·상영·매출."""
+    if not os.path.exists(MEMBER_SNAP):
+        return None
+    try:
+        with open(MEMBER_SNAP, encoding="utf-8-sig", newline="") as f:
+            rows = [r for r in csv.DictReader(f) if r.get("관객수")]
+    except Exception:
+        return None
+    if not rows:
+        return None
+    last = rows[-1]
+    out = {k: _num(last.get(k)) for k in
+           ("관객수", "누적관객수", "무료관객수", "상영횟수", "스크린수", "매출액", "누적매출액")}
+    out["날짜"] = last.get("날짜", "")
+    return out
+
+
+def _short_theater(name):
+    for p in ("메가박스 ", "CGV ", "롯데시네마 "):
+        if name.startswith(p):
+            return name[len(p):]
+    return name
+
+
+def _member_section():
+    """회원통계(실관객) 섹션 — 개봉 후 데이터가 있을 때만 렌더(없으면 빈 문자열)."""
+    try:
+        det = json.load(io.open(MEMBER_DETAIL, encoding="utf-8"))
+    except Exception:
+        return ""
+    if not det or not det.get("total"):
+        return ""
+    s = _member_summary() or {}
+    total = det.get("total", 0)
+    fill = det.get("fill_rate", 0)
+    scr = det.get("screen_count", 0)
+    today = s.get("관객수") or total
+    cum = s.get("누적관객수") or total
+    shows = s.get("상영횟수") or 0
+    free = s.get("무료관객수") or 0
+    paid = max(0, today - free)
+    date = det.get("date") or s.get("날짜") or ""
+    # ── 요약 카드 ──
+    cards = (
+        f'<div class="mstat"><div class="mh">🎟️ 개봉 실적 · 회원통계(실관객)<span>{date} 기준</span></div>'
+        f'<div class="mgrid">'
+        f'<div><b>{today:,}</b><span>오늘 관객</span></div>'
+        f'<div><b>{cum:,}</b><span>누적 관객</span></div>'
+        f'<div><b>{fill:.0f}%</b><span>좌석판매율</span></div>'
+        f'<div><b>{scr}</b><span>상영관 · {shows}회</span></div>'
+        f'</div>'
+        + (f'<div class="mnote">유료 {paid:,} · 무료 {free:,}</div>' if free else '')
+        + '</div>')
+    # ── 관별 랭킹 ──
+    theaters = det.get("theaters", [])[:15]
+    tmax = max((t[1] for t in theaters), default=1) or 1
+    trows = ""
+    for name, aud, nscr in theaters:
+        w = max(3, round(aud / tmax * 100))
+        trows += (f'<div class="trow"><span class="tn">{_short_theater(name)}</span>'
+                  f'<span class="tb"><i style="width:{w}%"></i></span>'
+                  f'<span class="tv">{aud:,}<em>· {nscr}관</em></span></div>')
+    rank_panel = (f'<div class="panel"><h2>관별 관객 랭킹 · 잘 드는 극장</h2>{trows}</div>'
+                  if trows else "")
+    # ── 회차(시간대) × 극장 히트맵 ──
+    slots = det.get("slots", [])
+    tslots = det.get("theater_slots", {})
+    heat = ""
+    if slots and any(slots):
+        nsl = len(slots)
+        cellmax = max((v for row in tslots.values() for v in row), default=1) or 1
+        head = '<div class="hcell hh"></div>' + "".join(
+            f'<div class="hcell hh">{i+1}회</div>' for i in range(nsl))
+        # 전체(회차 합) 행
+        smax = max(slots) or 1
+        allrow = '<div class="hcell hn">전체</div>' + "".join(
+            f'<div class="hcell" style="background:rgba(139,157,255,{0.10+0.85*(v/smax):.2f})">{v or ""}</div>'
+            for v in slots)
+        body = f'<div class="hrow">{head}</div><div class="hrow tot">{allrow}</div>'
+        for name, aud, _ in theaters[:12]:
+            row = tslots.get(name, [0] * nsl)
+            cells = "".join(
+                f'<div class="hcell" style="background:rgba(139,157,255,{(0.06+0.9*(v/cellmax)) if v else 0:.2f})">{v or ""}</div>'
+                for v in (row + [0] * (nsl - len(row)))[:nsl])
+            heat += f'<div class="hrow"><div class="hcell hn">{_short_theater(name)}</div>{cells}</div>'
+        heat = (f'<div class="panel"><h2>시간대별(회차) × 극장 히트맵 · 진한 칸일수록 관객 집중</h2>'
+                f'<div class="heat" style="grid-template-columns:120px repeat({nsl},1fr)">'
+                f'{body}{heat}</div>'
+                f'<div class="hleg">왼쪽=이른 회차 · 오른쪽=늦은 회차 · 숫자는 관객수</div></div>')
+    # ── 지역 · 체인 ──
+    regions = det.get("regions", [])[:6]
+    rg = "".join(f'<div class="cmp"><span class="cn">{r[0]}</span>'
+                 f'<span class="cv">{r[1]:,}<em style="color:var(--muted)"> · {r[3]:.0f}%</em></span></div>'
+                 for r in regions)
+    chains = det.get("chains", [])
+    ch = "".join(f'<div class="cmp"><span class="cn">{c[0]}</span>'
+                 f'<span class="cv">{c[3]:,}<em style="color:var(--muted)"> · {c[1]}관</em></span></div>'
+                 for c in chains)
+    rc_panel = (f'<div class="panel"><h2>지역 · 체인 (관객 · 좌석판매율/관수)</h2>'
+                f'<div class="rc"><div>{rg}</div><div>{ch}</div></div></div>'
+                if (rg or ch) else "")
+    return cards + rank_panel + heat + rc_panel
+
+
 def _eod_forecast():
     """오늘 마감(23:59) 예매관객 역산 — 최근 완주일들의 '현재 시각까지 붙는 비율'로 오늘 총증가 추정."""
     import statistics as _st
@@ -306,6 +415,7 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__CUM__", (f"{cum:,}" if cum else "—"))
     html = html.replace("__SPARK__", spark or '<div class="empty">예매 추세는 수집이 몇 시간 쌓이면 표시됩니다</div>')
     html = html.replace("__EODCARD__", _eod_card())
+    html = html.replace("__MEMBER__", _member_section())
     html = html.replace("__COMMENT__", _ai_comment())
     html = html.replace("__COOPEN__", _coopen_section())
     html = html.replace("__UPD__", upd or "수집 대기 중")
@@ -353,6 +463,33 @@ _TPL = """<!doctype html>
   .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good);margin-right:6px;
     box-shadow:0 0 0 0 rgba(74,222,128,.5);animation:b 2.4s infinite}
   @keyframes b{70%{box-shadow:0 0 0 7px rgba(74,222,128,0)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
+  .mstat{background:linear-gradient(135deg,#241d2e 0%,#171b24 78%);border:1px solid #4a3a5e;
+    border-radius:16px;padding:16px 20px;margin-top:12px}
+  .mstat .mh{font-weight:750;font-size:13px;color:#d6b8ff;display:flex;justify-content:space-between;
+    align-items:baseline;margin-bottom:12px}
+  .mstat .mh span{font-size:11px;color:var(--muted);font-weight:400}
+  .mgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;text-align:center}
+  .mgrid b{display:block;font-size:24px;font-weight:850;letter-spacing:-.02em;color:#e7d6ff;
+    font-variant-numeric:tabular-nums}
+  .mgrid span{font-size:11px;color:var(--muted)}
+  .mstat .mnote{font-size:12px;color:var(--muted);margin-top:10px;text-align:center}
+  .trow{display:flex;align-items:center;gap:9px;margin:6px 0;font-size:13px}
+  .trow .tn{width:120px;flex:none;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .trow .tb{flex:1;height:9px;border-radius:99px;background:#20242e;overflow:hidden}
+  .trow .tb i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#5f7bff,#aab6ff)}
+  .trow .tv{width:78px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+  .trow .tv em{color:var(--muted);font-style:normal;font-size:10.5px;margin-left:4px}
+  .heat{display:grid;gap:3px;overflow-x:auto}
+  .hcell{min-width:30px;height:26px;display:flex;align-items:center;justify-content:center;
+    font-size:10.5px;border-radius:5px;background:#181c26;font-variant-numeric:tabular-nums;color:#dfe4ef}
+  .hcell.hh{background:transparent;color:var(--muted);font-size:10px;height:20px}
+  .hcell.hn{justify-content:flex-start;background:transparent;color:var(--ink);font-size:11.5px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:4px}
+  .hrow{display:contents}
+  .hrow.tot .hcell{outline:1px solid rgba(139,157,255,.35)}
+  .hleg{font-size:11px;color:var(--muted);margin-top:8px}
+  .rc{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:520px){.mgrid{grid-template-columns:repeat(2,1fr)}.rc{grid-template-columns:1fr}}
   .eod{background:linear-gradient(135deg,#152a20 0%,#171b24 78%);border:1px solid #2f5b45;
     border-radius:16px;padding:16px 20px;margin-top:12px}
   .eod .eodh{font-weight:750;font-size:13px;color:#7ee0a8;display:flex;justify-content:space-between;
@@ -400,6 +537,8 @@ _TPL = """<!doctype html>
   __EODCARD__
 
   __COMMENT__
+
+  __MEMBER__
 
   <div class="panel">
     <h2>시간당 예매 순증 (막대=순증분 · 아래=그 시점 누적)</h2>

@@ -92,6 +92,7 @@ def aggregate_detail(cellrows):
     by_slot = []          # 1회·2회·… 전체 관객 합 (길이=그날 최대 회차)
     by_theater_slot = {}  # 극장 → [1회~N회 관객] (지점×시간대 크로스 히트맵)
     total = 0
+    cap = 0               # 좌석판매율용 판매좌석수 Σ(좌석 × 실판매 회차수)
     for d in cellrows:
         if len(d) < 8 or not re.match(r"^\d{4}", str(d[0])):  # 20260701 / 2026-07-01 둘다
             continue
@@ -106,14 +107,18 @@ def aggregate_detail(cellrows):
         s["관객"] += aud_total
         # 회차별 관객: idx 9,11,13,… (컬럼 끝까지, 회차수 가변)
         tslot = by_theater_slot.setdefault(theater, [])
+        screenings = 0                        # 이 상영관의 실판매 회차수(관객>0)
         for i, col in enumerate(range(9, len(d), 2)):
             v = _num(d[col]) or 0
+            if v > 0:
+                screenings += 1
             while len(by_slot) <= i:
                 by_slot.append(0)
             while len(tslot) <= i:
                 tslot.append(0)
             by_slot[i] += v
             tslot[i] += v            # 지점별 회차(시간대) 관객 크로스 보존
+        cap += (seats or 0) * screenings
     # 체인별 집계 (상영관수/좌석수/관객) — 상영관 단위로 중복 없이
     def chain_of(name):
         if "CGV" in name:
@@ -165,6 +170,8 @@ def aggregate_detail(cellrows):
         "chains": chains,
         "slots": by_slot,
         "screen_count": len(by_screen),
+        "sold_seats": cap,   # Σ(좌석 × 실판매 회차) — 좌석판매율 분모
+        "fill_rate": round(total / cap * 100, 1) if cap else 0,
     }
 
 
