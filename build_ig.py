@@ -272,6 +272,54 @@ def _member_section():
     return cards + rank_panel + heat + rc_panel
 
 
+def _eod_member_forecast():
+    """회원통계 실관객 + 개봉일 시간대 누적 프로파일로 '오늘 마감 실관람' 역산.
+    하루가 진행될수록(프로파일→1.0) 예측이 현재값에 수렴해 자동으로 좁혀진다."""
+    s = _member_summary()
+    if not s:
+        return None
+    aud = s.get("관객수") or 0
+    if aud < 200:
+        return None
+    # 수집 시각(시)
+    try:
+        snaps = list(csv.DictReader(open(MEMBER_SNAP, encoding="utf-8-sig")))
+        ts = snaps[-1].get("수집시각", "")
+        dt = datetime.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        h = dt.hour + dt.minute / 60.0
+    except Exception:
+        h = datetime.datetime.now().hour + 0.0
+    # 시각→그날 실관객 누적 비중(개봉일 선예매 선반영형). 앵커 선형보간.
+    prof = [(6, 0.30), (10, 0.56), (12, 0.62), (14, 0.68), (16, 0.75),
+            (18, 0.82), (20, 0.89), (22, 0.95), (24, 1.0)]
+    if h <= prof[0][0]:
+        f = prof[0][1]
+    elif h >= prof[-1][0]:
+        f = 1.0
+    else:
+        f = prof[-1][1]
+        for (h0, f0), (h1, f1) in zip(prof, prof[1:]):
+            if h0 <= h <= h1:
+                f = f0 + (f1 - f0) * (h - h0) / (h1 - h0)
+                break
+    pred = aud / f
+    lo = aud / min(1.0, f + 0.06)
+    hi = aud / max(0.32, f - 0.06)
+    r100 = lambda n: int(round(n / 100.0) * 100)
+    return {"pred": r100(pred), "lo": r100(lo), "hi": r100(hi),
+            "aud": aud, "hm": f"{int(h):02d}:{int((h%1)*60):02d}", "frac": f}
+
+
+def _eod_member_card():
+    f = _eod_member_forecast()
+    if not f:
+        return ""
+    return (f'<div class="eodm"><div class="eodh">🎯 오늘 예상 마감 관객 (실관람)<span>{f["hm"]} 기준</span></div>'
+            f'<div class="eodv">약 {f["pred"]:,}<small>명 ({f["lo"]:,}~{f["hi"]:,})</small></div>'
+            f'<div class="eodn">현재 실관객 {f["aud"]:,} · 남은 회차 유입 반영(시간대 누적 {f["frac"]*100:.0f}% 지점) · '
+            f'개봉일이라 오차 큼, 밤에 수렴</div></div>')
+
+
 def _eod_forecast():
     """오늘 마감(23:59) 예매관객 역산 — 최근 완주일들의 '현재 시각까지 붙는 비율'로 오늘 총증가 추정."""
     import statistics as _st
@@ -414,6 +462,7 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__RANK__", (f"{rank}위" if rank else "—"))
     html = html.replace("__CUM__", (f"{cum:,}" if cum else "—"))
     html = html.replace("__SPARK__", spark or '<div class="empty">예매 추세는 수집이 몇 시간 쌓이면 표시됩니다</div>')
+    html = html.replace("__EODMEMBER__", _eod_member_card())
     html = html.replace("__EODCARD__", _eod_card())
     html = html.replace("__MEMBER__", _member_section())
     html = html.replace("__COMMENT__", _ai_comment())
@@ -490,6 +539,14 @@ _TPL = """<!doctype html>
   .hleg{font-size:11px;color:var(--muted);margin-top:8px}
   .rc{display:grid;grid-template-columns:1fr 1fr;gap:18px}
   @media(max-width:520px){.mgrid{grid-template-columns:repeat(2,1fr)}.rc{grid-template-columns:1fr}}
+  .eodm{background:linear-gradient(135deg,#3a2a0e 0%,#171b24 74%);border:1px solid #6a5320;
+    border-radius:16px;padding:16px 20px;margin-top:12px}
+  .eodm .eodh{font-weight:750;font-size:13px;color:#f4c89a;display:flex;justify-content:space-between;
+    align-items:baseline;margin-bottom:6px}
+  .eodm .eodh span{font-size:11px;color:var(--muted);font-weight:400}
+  .eodm .eodv{font-size:36px;font-weight:850;letter-spacing:-.02em;color:#f7d9b0;font-variant-numeric:tabular-nums}
+  .eodm .eodv small{font-size:14px;font-weight:600;color:var(--muted)}
+  .eodm .eodn{font-size:12px;color:var(--muted);margin-top:5px}
   .eod{background:linear-gradient(135deg,#152a20 0%,#171b24 78%);border:1px solid #2f5b45;
     border-radius:16px;padding:16px 20px;margin-top:12px}
   .eod .eodh{font-weight:750;font-size:13px;color:#7ee0a8;display:flex;justify-content:space-between;
@@ -533,6 +590,8 @@ _TPL = """<!doctype html>
     <div class="card"><div class="k">예매율</div><div class="v">__RATE__</div></div>
     <div class="card"><div class="k">예매 순위</div><div class="v">__RANK__</div></div>
   </div>
+
+  __EODMEMBER__
 
   __EODCARD__
 
