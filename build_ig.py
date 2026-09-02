@@ -289,22 +289,24 @@ def _eod_member_forecast():
         h = dt.hour + dt.minute / 60.0
     except Exception:
         h = datetime.datetime.now().hour + 0.0
-    # 시각→그날 실관객 누적 비중(개봉일 선예매 선반영형). 앵커 선형보간.
-    prof = [(6, 0.30), (10, 0.56), (12, 0.62), (14, 0.68), (16, 0.75),
-            (18, 0.82), (20, 0.89), (22, 0.95), (24, 1.0)]
-    if h <= prof[0][0]:
-        f = prof[0][1]
-    elif h >= prof[-1][0]:
+    # 시각→그날 실관객 누적 비중. 그린랜드2 15일 회원통계 실측 곡선(관객/그날최종 평균).
+    # 출처: benchmarks/greenland2/member_snapshots.csv. 정시 앵커, 분은 선형보간.
+    # 주의: 그린랜드2 첫날은 오전 미수집이라 이 곡선은 전체일 평균이다(개봉일은 선예매가
+    # 더 몰려 오전 비중이 다소 높을 수 있음 → 개봉일 오전엔 최종이 약간 과대추정될 여지).
+    GL2 = {0: .435, 1: .412, 2: .413, 3: .417, 4: .413, 5: .413, 6: .414, 7: .417,
+           8: .432, 9: .522, 10: .594, 11: .614, 12: .655, 13: .722, 14: .768,
+           15: .815, 16: .854, 17: .890, 18: .922, 19: .951, 20: .972, 21: .988,
+           22: .996, 23: 1.0}
+    hh = int(h)
+    if hh >= 23:
         f = 1.0
     else:
-        f = prof[-1][1]
-        for (h0, f0), (h1, f1) in zip(prof, prof[1:]):
-            if h0 <= h <= h1:
-                f = f0 + (f1 - f0) * (h - h0) / (h1 - h0)
-                break
+        f0, f1 = GL2[hh], GL2.get(hh + 1, 1.0)
+        f = f0 + (f1 - f0) * (h - hh)
+    hw = 0.05 * (1 - f) + 0.01          # 오전은 넓게, 저녁으로 갈수록 촘촘하게
     pred = aud / f
-    lo = aud / min(1.0, f + 0.06)
-    hi = aud / max(0.32, f - 0.06)
+    lo = aud / min(1.0, f + hw)
+    hi = aud / max(0.32, f - hw)
     r100 = lambda n: int(round(n / 100.0) * 100)
     return {"pred": r100(pred), "lo": r100(lo), "hi": r100(hi),
             "aud": aud, "hm": f"{int(h):02d}:{int((h%1)*60):02d}", "frac": f}
@@ -316,8 +318,8 @@ def _eod_member_card():
         return ""
     return (f'<div class="eodm"><div class="eodh">🎯 오늘 예상 마감 관객 (실관람)<span>{f["hm"]} 기준</span></div>'
             f'<div class="eodv">약 {f["pred"]:,}<small>명 ({f["lo"]:,}~{f["hi"]:,})</small></div>'
-            f'<div class="eodn">현재 실관객 {f["aud"]:,} · 남은 회차 유입 반영(시간대 누적 {f["frac"]*100:.0f}% 지점) · '
-            f'개봉일이라 오차 큼, 밤에 수렴</div></div>')
+            f'<div class="eodn">현재 실관객 {f["aud"]:,} · 그린랜드2 실측 시간대 곡선 역산(현재 {f["frac"]*100:.0f}% 지점) · '
+            f'저녁으로 갈수록 실측에 수렴</div></div>')
 
 
 def _eod_forecast():
