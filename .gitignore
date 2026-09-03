@@ -5,3 +5,11 @@ __pycache__/
 kobis_login.txt
 
 slack_webhook.txt
+
+# 핀포인트 방어(대외비·로컬전용)
+pinpoint_history.json
+pinpoint_*.xlsx
+build_pinpoint_xlsx.py
+_pinpoint.txt
+_wf_*.txt
+_last_report.txt
