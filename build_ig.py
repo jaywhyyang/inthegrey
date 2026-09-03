@@ -297,6 +297,45 @@ def _daily_report_card():
             '<span>' + upd + '</span></div>' + body + '</div>')
 
 
+def _comp_forward():
+    """전날에서 '오늘 기대치'를 comp(그린랜드2 드롭률 + 페이싱)로 전방 예측.
+    나우캐스트(후행)와 비교해 '예상보다 빠른/느린 하락'을 판정한다."""
+    try:
+        st = json.load(io.open(os.path.join(BASE, "report_state.json"), encoding="utf-8"))
+        d = json.load(io.open(_band_path(), encoding="utf-8"))
+    except Exception:
+        return None
+    open_ad = st.get("open_admits")
+    finals = st.get("finals", {})
+    if not open_ad or not finals:
+        return None
+    today = datetime.date.today()
+    day_n = (today - OPEN_DATE).days + 1
+    if day_n < 2:
+        return None
+    import math as _m
+    mdl = d.get("model", {})
+    pac = (d.get("pacing", {}) or {}).get("median", {})
+    a, b = mdl.get("a"), mdl.get("b")
+    if not (a and b):
+        return None
+    final = _m.exp(a + b * _m.log(open_ad))
+    pts = sorted((int(k[1:]), v) for k, v in pac.items() if k.startswith("D"))
+    pts = [(0, 0.0)] + pts
+
+    def pcum(n):
+        if n <= 0:
+            return 0.0
+        if n >= pts[-1][0]:
+            return min(1.0, pts[-1][1])
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            if x0 <= n <= x1:
+                return y0 + (y1 - y0) * (n - x0) / (x1 - x0)
+        return pts[-1][1]
+    pace_today = (pcum(day_n) - pcum(day_n - 1)) * final    # 페이싱 기반 오늘 기대
+    return {"day_n": day_n, "pace": int(round(pace_today)), "final": int(final)}
+
+
 def _eod_member_forecast():
     """회원통계 실관객 + 개봉일 시간대 누적 프로파일로 '오늘 마감 실관람' 역산.
     하루가 진행될수록(프로파일→1.0) 예측이 현재값에 수렴해 자동으로 좁혀진다."""
@@ -341,10 +380,22 @@ def _eod_member_card():
     f = _eod_member_forecast()
     if not f:
         return ""
+    cmp = ""
+    cf = _comp_forward()
+    if cf and cf.get("pace", 0) > 0:
+        gap = (f["pred"] - cf["pace"]) / cf["pace"] * 100
+        if gap <= -12:
+            tag = f'실측이 {abs(gap):.0f}% 낮음 → <b>예상보다 빠른 소진</b>(즉시소진 강함)'
+        elif gap >= 12:
+            tag = f'실측이 {gap:.0f}% 높음 → 예상보다 견조'
+        else:
+            tag = '근거 예측과 대체로 일치'
+        cmp = (f'<div class="eodcmp">📐 근거 예측 <b>{cf["pace"]:,}명</b>'
+               f'<small>(comp 페이싱·모델)</small> vs 실측 나우캐스트 {f["pred"]:,}명 — {tag}</div>')
     return (f'<div class="eodm"><div class="eodh">🎯 오늘 예상 마감 관객 (실관람)<span>{f["hm"]} 기준</span></div>'
             f'<div class="eodv">약 {f["pred"]:,}<small>명 ({f["lo"]:,}~{f["hi"]:,})</small></div>'
-            f'<div class="eodn">현재 실관객 {f["aud"]:,} · 그린랜드2 실측 시간대 곡선 역산(현재 {f["frac"]*100:.0f}% 지점) · '
-            f'저녁으로 갈수록 실측에 수렴</div></div>')
+            f'<div class="eodn">현재 실관객 {f["aud"]:,} · 그린랜드2 실측 시간대 곡선 역산(현재 {f["frac"]*100:.0f}% 지점, 후행형)</div>'
+            f'{cmp}</div>')
 
 
 def _eod_forecast():
@@ -582,6 +633,10 @@ _TPL = """<!doctype html>
   .eodm .eodv{font-size:36px;font-weight:850;letter-spacing:-.02em;color:#f7d9b0;font-variant-numeric:tabular-nums}
   .eodm .eodv small{font-size:14px;font-weight:600;color:var(--muted)}
   .eodm .eodn{font-size:12px;color:var(--muted);margin-top:5px}
+  .eodm .eodcmp{font-size:12px;color:var(--ink);margin-top:8px;padding-top:8px;
+    border-top:1px solid rgba(244,200,154,.22);line-height:1.6}
+  .eodm .eodcmp b{color:#f4c89a}
+  .eodm .eodcmp small{color:var(--muted);font-size:10.5px}
   .eod{background:linear-gradient(135deg,#152a20 0%,#171b24 78%);border:1px solid #2f5b45;
     border-radius:16px;padding:16px 20px;margin-top:12px}
   .eod .eodh{font-weight:750;font-size:13px;color:#7ee0a8;display:flex;justify-content:space-between;
