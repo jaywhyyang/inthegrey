@@ -336,6 +336,139 @@ def _comp_forward():
     return {"day_n": day_n, "pace": int(round(pace_today)), "final": int(final)}
 
 
+_GL2_INTRA = {0: .435, 1: .412, 2: .413, 3: .417, 4: .413, 5: .413, 6: .414, 7: .417,
+              8: .432, 9: .522, 10: .594, 11: .614, 12: .655, 13: .722, 14: .768,
+              15: .815, 16: .854, 17: .890, 18: .922, 19: .951, 20: .972, 21: .988,
+              22: .996, 23: 1.0}
+
+
+def _intra_frac(h):
+    hh = int(h)
+    if hh >= 23:
+        return 1.0
+    f0, f1 = _GL2_INTRA[hh], _GL2_INTRA.get(hh + 1, 1.0)
+    return f0 + (f1 - f0) * (h - hh)
+
+
+def _pace_cum(n, pac):
+    pts = sorted((int(k[1:]), v) for k, v in pac.items() if k.startswith("D"))
+    if not pts:
+        return None
+    pts = [(0, 0.0)] + pts
+    if n <= 0:
+        return 0.0
+    if n >= pts[-1][0]:
+        return min(1.0, pts[-1][1])
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if x0 <= n <= x1:
+            return y0 + (y1 - y0) * (n - x0) / (x1 - x0)
+    return pts[-1][1]
+
+
+def _final_forecast():
+    """진행 중 생애 최종 예측: 누적 실관객 ÷ 페이싱(경과 일수) + 개봉일 모델 + 감쇠 보정.
+    주말 선예매 스냅샷을 맥락으로 함께 반환."""
+    import math as _m
+    snaps = []
+    if os.path.exists(MEMBER_SNAP):
+        try:
+            snaps = [r for r in csv.DictReader(open(MEMBER_SNAP, encoding="utf-8-sig")) if r.get("누적관객수")]
+        except Exception:
+            snaps = []
+    if not snaps:
+        return None
+    last = snaps[-1]
+    cum = _num(last.get("누적관객수")) or 0
+    if cum < 500:
+        return None
+    ts = last.get("수집시각", "")
+    try:
+        dt = datetime.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        h = dt.hour + dt.minute / 60.0
+        cur_date = dt.date()
+    except Exception:
+        return None
+    day_n = (cur_date - OPEN_DATE).days + 1
+    if day_n < 1:
+        return None
+    band = _band() if "_band" in globals() else None
+    try:
+        band = json.load(io.open(_band_path(), encoding="utf-8"))
+    except Exception:
+        return None
+    mdl = band.get("model", {})
+    pac = (band.get("pacing", {}) or {}).get("median", {})
+    a, b = mdl.get("a"), mdl.get("b")
+    st = {}
+    try:
+        st = json.load(io.open(os.path.join(BASE, "report_state.json"), encoding="utf-8"))
+    except Exception:
+        pass
+    open_ad = st.get("open_admits")
+    # 경과 일수(오늘 진행분 포함)
+    eff = (day_n - 1) + _intra_frac(h)
+    pc = _pace_cum(eff, pac)
+    final_pace = cum / pc if pc else None
+    final_model = _m.exp(a + b * _m.log(open_ad)) if (a and b and open_ad) else None
+    ests = [x for x in (final_pace, final_model) if x]
+    if not ests:
+        return None
+    central = sum(ests) / len(ests)
+    # 감쇠 보정: 이튿날/첫날 비율이 comp(0.73)보다 빠르면 하단으로
+    finals = st.get("finals", {})
+    lean = ""
+    d1 = finals.get(OPEN_DATE.strftime("%Y-%m-%d")) or open_ad
+    d2 = finals.get((OPEN_DATE + datetime.timedelta(days=1)).strftime("%Y-%m-%d"))
+    if not d2 and day_n == 2:               # 오늘이 이튿날이면 나우캐스트로 대체
+        ef = _eod_member_forecast()
+        if ef:
+            d2 = ef.get("pred")
+    if d1 and d2:
+        ratio = d2 / d1
+        if ratio < 0.6:
+            central = min(ests) * 0.90       # 빠른 감쇠 → 보수적(하단)
+            lean = f"이튿날/첫날 {ratio:.2f}로 comp(0.73)보다 빨라 하단 반영"
+    lo = int(round(central * 0.8 / 1000) * 1000)
+    hi = int(round(central * 1.35 / 1000) * 1000)
+    # 주말 선예매(최신 스냅샷)
+    wk = {}
+    try:
+        fa = json.load(io.open(os.path.join(BASE, "future_advance_log.json"), encoding="utf-8"))
+        for tgt in ("2026-09-05", "2026-09-06", "2026-09-07"):
+            snaps_t = fa.get(tgt, {})
+            if snaps_t:
+                latest = sorted(snaps_t.items())[-1][1]
+                wk[tgt] = latest.get("aud")
+    except Exception:
+        pass
+    return {"central": int(round(central / 100) * 100), "lo": lo, "hi": hi,
+            "cum": cum, "day_n": day_n, "final_pace": int(final_pace) if final_pace else None,
+            "final_model": int(final_model) if final_model else None, "lean": lean, "weekend": wk}
+
+
+def _final_card():
+    f = _final_forecast()
+    if not f:
+        return ""
+    wk = f.get("weekend") or {}
+    wkstr = ""
+    if wk:
+        names = {"2026-09-05": "금", "2026-09-06": "토", "2026-09-07": "일"}
+        wkstr = " · ".join(f"{names[k]} {v:,}" for k, v in wk.items() if v)
+    parts = []
+    if f["final_pace"]:
+        parts.append(f"{f['day_n']}일차 누적 {f['cum']:,} ÷ 페이싱 → {f['final_pace']/10000:.1f}만")
+    if f["final_model"]:
+        parts.append(f"개봉일 모델 {f['final_model']/10000:.1f}만")
+    sub = " · ".join(parts)
+    lean = f' · {f["lean"]}' if f.get("lean") else ""
+    wkline = (f'<div class="ffwk">주말 선예매(계속 유입): {wkstr}</div>' if wkstr else "")
+    return (f'<div class="ff"><div class="ffh">🏁 생애 최종 관객 예측 <span>진행 중 · {f["day_n"]}일차</span></div>'
+            f'<div class="ffv">약 {f["central"]:,}<small>명 ({f["lo"]:,}~{f["hi"]:,})</small></div>'
+            f'<div class="ffn">{sub}{lean}</div>{wkline}'
+            f'<div class="ffn2">아직 개봉 초반이라 구간이 넓습니다. 3일차·첫 주말이 확정되면 급격히 좁혀집니다.</div></div>')
+
+
 def _eod_member_forecast():
     """회원통계 실관객 + 개봉일 시간대 누적 프로파일로 '오늘 마감 실관람' 역산.
     하루가 진행될수록(프로파일→1.0) 예측이 현재값에 수렴해 자동으로 좁혀진다."""
@@ -540,6 +673,7 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__RANK__", (f"{rank}위" if rank else "—"))
     html = html.replace("__CUM__", (f"{cum:,}" if cum else "—"))
     html = html.replace("__SPARK__", spark or '<div class="empty">예매 추세는 수집이 몇 시간 쌓이면 표시됩니다</div>')
+    html = html.replace("__FINAL__", _final_card())
     html = html.replace("__DAILYREPORT__", _daily_report_card())
     html = html.replace("__EODMEMBER__", _eod_member_card())
     html = html.replace("__EODCARD__", _eod_card())
@@ -618,6 +752,16 @@ _TPL = """<!doctype html>
   .hleg{font-size:11px;color:var(--muted);margin-top:8px}
   .rc{display:grid;grid-template-columns:1fr 1fr;gap:18px}
   @media(max-width:520px){.mgrid{grid-template-columns:repeat(2,1fr)}.rc{grid-template-columns:1fr}}
+  .ff{background:linear-gradient(135deg,#0f2a2e 0%,#171b24 76%);border:1px solid #2b5a5f;
+    border-radius:16px;padding:18px 20px;margin-top:12px}
+  .ff .ffh{font-weight:800;font-size:14px;color:#8fe3d6;display:flex;justify-content:space-between;
+    align-items:baseline;margin-bottom:6px}
+  .ff .ffh span{font-size:11px;color:var(--muted);font-weight:400}
+  .ff .ffv{font-size:40px;font-weight:850;letter-spacing:-.02em;color:#b6f0e4;font-variant-numeric:tabular-nums}
+  .ff .ffv small{font-size:15px;font-weight:600;color:var(--muted)}
+  .ff .ffn{font-size:12.5px;color:var(--ink);margin-top:6px;line-height:1.6}
+  .ff .ffwk{font-size:12.5px;color:#8fe3d6;margin-top:6px}
+  .ff .ffn2{font-size:11.5px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid rgba(143,227,214,.2)}
   .drep{background:linear-gradient(135deg,#141b2c 0%,#171b24 80%);border:1px solid #2c3a55;
     border-radius:16px;padding:16px 20px;margin-top:12px}
   .drep .dh{font-weight:800;font-size:15px;color:#cdd6ff;display:flex;justify-content:space-between;
@@ -680,6 +824,8 @@ _TPL = """<!doctype html>
     <div class="card"><div class="k">예매율</div><div class="v">__RATE__</div></div>
     <div class="card"><div class="k">예매 순위</div><div class="v">__RANK__</div></div>
   </div>
+
+  __FINAL__
 
   __DAILYREPORT__
 
