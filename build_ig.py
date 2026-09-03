@@ -272,6 +272,31 @@ def _member_section():
     return cards + rank_panel + heat + rc_panel
 
 
+DAILY_REPORT = os.path.join(BASE, "daily_report.json")
+
+
+def _daily_report_card():
+    """daily_report.json(build_daily_report.py 생성)을 읽어 상단 '어제 리포트' 카드."""
+    try:
+        d = json.load(io.open(DAILY_REPORT, encoding="utf-8"))
+    except Exception:
+        return ""
+    txt = (d.get("text") or "").strip()
+    if not txt:
+        return ""
+    paras = [p.strip() for p in txt.split("\n\n") if p.strip()]
+    head = re.sub(r"\*([^*]+)\*", r"\1", paras[0]).replace("📊", "").strip()
+    parts = []
+    for p in paras[1:]:
+        if p.startswith("📈"):
+            continue
+        parts.append("<p>" + re.sub(r"\*([^*]+)\*", r"<b>\1</b>", p) + "</p>")
+    body = "".join(parts)
+    upd = str(d.get("updated", ""))
+    return ('<div class="drep"><div class="dh">🗞️ ' + head +
+            '<span>' + upd + '</span></div>' + body + '</div>')
+
+
 def _eod_member_forecast():
     """회원통계 실관객 + 개봉일 시간대 누적 프로파일로 '오늘 마감 실관람' 역산.
     하루가 진행될수록(프로파일→1.0) 예측이 현재값에 수렴해 자동으로 좁혀진다."""
@@ -464,6 +489,7 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__RANK__", (f"{rank}위" if rank else "—"))
     html = html.replace("__CUM__", (f"{cum:,}" if cum else "—"))
     html = html.replace("__SPARK__", spark or '<div class="empty">예매 추세는 수집이 몇 시간 쌓이면 표시됩니다</div>')
+    html = html.replace("__DAILYREPORT__", _daily_report_card())
     html = html.replace("__EODMEMBER__", _eod_member_card())
     html = html.replace("__EODCARD__", _eod_card())
     html = html.replace("__MEMBER__", _member_section())
@@ -541,6 +567,13 @@ _TPL = """<!doctype html>
   .hleg{font-size:11px;color:var(--muted);margin-top:8px}
   .rc{display:grid;grid-template-columns:1fr 1fr;gap:18px}
   @media(max-width:520px){.mgrid{grid-template-columns:repeat(2,1fr)}.rc{grid-template-columns:1fr}}
+  .drep{background:linear-gradient(135deg,#141b2c 0%,#171b24 80%);border:1px solid #2c3a55;
+    border-radius:16px;padding:16px 20px;margin-top:12px}
+  .drep .dh{font-weight:800;font-size:15px;color:#cdd6ff;display:flex;justify-content:space-between;
+    align-items:baseline;gap:10px;margin-bottom:8px;line-height:1.4}
+  .drep .dh span{font-size:11px;color:var(--muted);font-weight:400;white-space:nowrap}
+  .drep p{font-size:13.5px;line-height:1.75;margin:.5em 0;color:var(--ink)}
+  .drep p b{color:#aab6ff}
   .eodm{background:linear-gradient(135deg,#3a2a0e 0%,#171b24 74%);border:1px solid #6a5320;
     border-radius:16px;padding:16px 20px;margin-top:12px}
   .eodm .eodh{font-weight:750;font-size:13px;color:#f4c89a;display:flex;justify-content:space-between;
@@ -592,6 +625,8 @@ _TPL = """<!doctype html>
     <div class="card"><div class="k">예매율</div><div class="v">__RATE__</div></div>
     <div class="card"><div class="k">예매 순위</div><div class="v">__RANK__</div></div>
   </div>
+
+  __DAILYREPORT__
 
   __EODMEMBER__
 
