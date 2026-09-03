@@ -415,10 +415,19 @@ def _final_forecast():
         return None
     central = sum(ests) / len(ests)
     # 감쇠 보정: 이튿날/첫날 비율이 comp(0.73)보다 빠르면 하단으로
-    finals = st.get("finals", {})
+    # 일별 실측(회원 스냅샷 날짜별 최대값)으로 감쇠 신호 — report_state보다 최신·견고
+    mdf = {}
+    try:
+        for r in csv.DictReader(open(MEMBER_SNAP, encoding="utf-8-sig")):
+            dd = r.get("날짜"); a = _num(r.get("관객수"))
+            if dd:
+                mdf[dd] = max(mdf.get(dd, 0), a or 0)
+    except Exception:
+        pass
     lean = ""
-    d1 = finals.get(OPEN_DATE.strftime("%Y-%m-%d")) or open_ad
-    d2 = finals.get((OPEN_DATE + datetime.timedelta(days=1)).strftime("%Y-%m-%d"))
+    d1 = mdf.get(OPEN_DATE.strftime("%Y-%m-%d")) or open_ad
+    completes = sorted(d for d in mdf if d < cur_date.strftime("%Y-%m-%d"))
+    d2 = mdf.get(completes[1]) if len(completes) >= 2 else None
     if not d2 and day_n == 2:               # 오늘이 이튿날이면 나우캐스트로 대체
         ef = _eod_member_forecast()
         if ef:
