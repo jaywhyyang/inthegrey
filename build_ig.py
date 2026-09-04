@@ -84,7 +84,9 @@ def _ai_comment():
     text = (d.get("text") or "").strip()
     if not text:
         return ""
-    body = "".join(f"<p>{ln}</p>" for ln in text.split("\n") if ln.strip())
+    # '관전 포인트' 문단은 아래 watch 줄과 중복이라 본문에서 제외
+    body = "".join(f"<p>{ln}</p>" for ln in text.split("\n")
+                   if ln.strip() and not ln.strip().startswith("관전 포인트"))
     watch = (d.get("watch") or "").strip()
     wh = f'<div class="watch"><b>관전 포인트</b> {watch}</div>' if watch else ""
     return (f'<div class="diag"><div class="dh">🔎 지금 진단<span>{d.get("updated","")}</span></div>'
@@ -301,8 +303,8 @@ def _daily_report_card():
         parts.append("<p>" + re.sub(r"\*([^*]+)\*", r"<b>\1</b>", p) + "</p>")
     body = "".join(parts)
     upd = str(d.get("updated", ""))
-    return ('<div class="drep"><div class="dh">🗞️ ' + head +
-            '<span>' + upd + '</span></div>' + body + '</div>')
+    return ('<details class="drep"><summary class="dh">🗞️ ' + head +
+            '<span>' + upd + ' · 펼치기</span></summary><div class="drepbody">' + body + '</div></details>')
 
 
 def _comp_forward():
@@ -602,12 +604,42 @@ def _eod_card():
             f'<div class="eodn">{sub}</div></div>')
 
 
+def _hero_grid(book, organic, rate, rank):
+    """상단 히어로 그리드 — 개봉 후엔 실관객, 개봉 전엔 예매 기준."""
+    s = _member_summary()
+    post = bool(s and (s.get("누적관객수") or 0) > 0 and datetime.date.today() >= OPEN_DATE)
+    if post:
+        cum = s.get("누적관객수") or 0
+        today_a = s.get("관객수") or 0
+        scr = s.get("스크린수") or 0
+        shows = s.get("상영횟수") or 0
+        return ('<div class="grid">'
+                '<div class="card hero"><div class="k">누적 실관객 (회원통계)</div>'
+                f'<div class="v">{cum:,}</div>'
+                f'<div class="note">오늘 {today_a:,}명 · 개봉일부터 누적</div></div>'
+                f'<div class="card"><div class="k">오늘 실관객</div><div class="v">{today_a:,}</div></div>'
+                f'<div class="card"><div class="k">오늘 편성</div><div class="v">{scr}'
+                f'<small style="font-size:14px;color:var(--muted);font-weight:600">관·{shows}회</small></div></div>'
+                '</div>')
+    if SHOW_ORGANIC:
+        note = (f"이 중 실예매(프로모 {PROMO_BASE:,}장 제외) <b>{organic:,}명</b>" if book else "이 중 실예매 —")
+    else:
+        note = "KOBIS 실시간 예매 기준 · 개봉일 이전 선예매 포함"
+    hero_book = f"{book:,}" if book else "—"
+    return ('<div class="grid">'
+            '<div class="card hero"><div class="k">예매 관객 (누적)</div>'
+            f'<div class="v">{hero_book}</div><div class="note">{note}</div></div>'
+            f'<div class="card"><div class="k">예매율</div><div class="v">{rate or "—"}</div></div>'
+            f'<div class="card"><div class="k">예매 순위</div><div class="v">{(str(rank) + "위") if rank else "—"}</div></div>'
+            '</div>')
+
+
 def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     load_band()   # 밴드는 매 빌드마다 교환 파일에서 다시 읽는다
     rows = _rows()
     today = datetime.date.today()
     dday = (OPEN_DATE - today).days
-    ddtxt = (f"D-{dday}" if dday > 0 else ("D-DAY" if dday == 0 else f"개봉 {-dday}일차"))
+    ddtxt = (f"D-{dday}" if dday > 0 else ("개봉일(D-DAY)" if dday == 0 else f"개봉 {-dday + 1}일차"))
 
     book = rank = rate = cum = 0
     upd = ""
@@ -679,16 +711,7 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
 
     html = _TPL
     html = html.replace("__DDAY__", ddtxt)
-    html = html.replace("__BOOK__", f"{book:,}" if book else "—")
-    if SHOW_ORGANIC:
-        note = (f"이 중 실예매(프로모 {PROMO_BASE:,}장 제외) <b>{organic:,}명</b>"
-                if book else "이 중 실예매 —")
-    else:
-        note = "KOBIS 실시간 예매 기준 · 개봉일 이전 선예매 포함"
-    html = html.replace("__NOTE__", note)
-    html = html.replace("__RATE__", rate or "—")
-    html = html.replace("__RANK__", (f"{rank}위" if rank else "—"))
-    html = html.replace("__CUM__", (f"{cum:,}" if cum else "—"))
+    html = html.replace("__HEROGRID__", _hero_grid(book, organic, rate, rank))
     html = html.replace("__SPARK__", spark or '<div class="empty">예매 추세는 수집이 몇 시간 쌓이면 표시됩니다</div>')
     html = html.replace("__FINAL__", _final_card())
     html = html.replace("__DAILYREPORT__", _daily_report_card())
@@ -781,9 +804,11 @@ _TPL = """<!doctype html>
   .ff .ffn2{font-size:11.5px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid rgba(143,227,214,.2)}
   .drep{background:linear-gradient(135deg,#141b2c 0%,#171b24 80%);border:1px solid #2c3a55;
     border-radius:16px;padding:16px 20px;margin-top:12px}
-  .drep .dh{font-weight:800;font-size:15px;color:#cdd6ff;display:flex;justify-content:space-between;
-    align-items:baseline;gap:10px;margin-bottom:8px;line-height:1.4}
-  .drep .dh span{font-size:11px;color:var(--muted);font-weight:400;white-space:nowrap}
+  .drep summary.dh{font-weight:800;font-size:14px;color:#cdd6ff;display:flex;justify-content:space-between;
+    align-items:baseline;gap:10px;line-height:1.4;cursor:pointer;list-style:none}
+  .drep summary.dh::-webkit-details-marker{display:none}
+  .drep summary.dh span{font-size:11px;color:var(--muted);font-weight:400;white-space:nowrap}
+  .drep[open] summary.dh{margin-bottom:8px}
   .drep p{font-size:13.5px;line-height:1.75;margin:.5em 0;color:var(--ink)}
   .drep p b{color:#aab6ff}
   .eodm{background:linear-gradient(135deg,#3a2a0e 0%,#171b24 74%);border:1px solid #6a5320;
@@ -832,15 +857,7 @@ _TPL = """<!doctype html>
     <div class="sub">2026-09-02 개봉 · 메가박스 단독 · 실시간 예매 트래커</div>
   </div>
 
-  <div class="grid">
-    <div class="card hero">
-      <div class="k">예매 관객 (누적)</div>
-      <div class="v">__BOOK__</div>
-      <div class="note">__NOTE__</div>
-    </div>
-    <div class="card"><div class="k">예매율</div><div class="v">__RATE__</div></div>
-    <div class="card"><div class="k">예매 순위</div><div class="v">__RANK__</div></div>
-  </div>
+  __HEROGRID__
 
   __FINAL__
 
