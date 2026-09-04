@@ -346,17 +346,25 @@ def _comp_forward():
     return {"day_n": day_n, "pace": int(round(pace_today)), "final": int(final)}
 
 
-_GL2_INTRA = {0: .435, 1: .412, 2: .413, 3: .417, 4: .413, 5: .413, 6: .414, 7: .417,
-              8: .432, 9: .522, 10: .594, 11: .614, 12: .655, 13: .722, 14: .768,
-              15: .815, 16: .854, 17: .890, 18: .922, 19: .951, 20: .972, 21: .988,
-              22: .996, 23: 1.0}
+# 그린랜드2 회원통계 실측 시간대 누적비중 곡선 — 요일보정용 평일/주말 분리.
+# (관객/그날최종 평균, benchmarks/greenland2/member_snapshots.csv)
+_INTRA_WD = {0: .382, 1: .339, 2: .34, 3: .347, 4: .347, 5: .347, 6: .347, 7: .351,
+             8: .367, 9: .508, 10: .606, 11: .619, 12: .656, 13: .741, 14: .787,
+             15: .84, 16: .877, 17: .91, 18: .943, 19: .961, 20: .977, 21: .989,
+             22: .997, 23: 1.0}   # 평일(월~목): 앞쪽 집중
+_INTRA_WK = {0: .496, 1: .528, 2: .53, 3: .529, 4: .501, 5: .501, 6: .502, 7: .506,
+             8: .518, 9: .541, 10: .577, 11: .607, 12: .654, 13: .694, 14: .738,
+             15: .779, 16: .819, 17: .858, 18: .894, 19: .935, 20: .964, 21: .985,
+             22: .996, 23: 1.0}   # 주말(금~일): 저녁 집중(더 평평)
 
 
-def _intra_frac(h):
+def _intra_frac(h, dow=None):
+    """시각 h(+요일 dow: 0=월)에서 그날 최종 대비 누적비중. 금~일은 주말 곡선."""
+    tbl = _INTRA_WK if (dow is not None and dow >= 4) else _INTRA_WD
     hh = int(h)
     if hh >= 23:
         return 1.0
-    f0, f1 = _GL2_INTRA[hh], _GL2_INTRA.get(hh + 1, 1.0)
+    f0, f1 = tbl[hh], tbl.get(hh + 1, 1.0)
     return f0 + (f1 - f0) * (h - hh)
 
 
@@ -416,7 +424,7 @@ def _final_forecast():
         pass
     open_ad = st.get("open_admits")
     # 경과 일수(오늘 진행분 포함)
-    eff = (day_n - 1) + _intra_frac(h)
+    eff = (day_n - 1) + _intra_frac(h, cur_date.weekday())
     pc = _pace_cum(eff, pac)
     final_pace = cum / pc if pc else None
     final_model = _m.exp(a + b * _m.log(open_ad)) if (a and b and open_ad) else None
@@ -488,6 +496,59 @@ def _final_card():
             f'<div class="ffn2">아직 개봉 초반이라 구간이 넓습니다. 3일차·첫 주말이 확정되면 급격히 좁혀집니다.</div></div>')
 
 
+def _member_delta_section():
+    """오늘 실관객 시간대별 증가(회원통계 수집 간격) 막대 — '몇명씩 늘었나' 가시화."""
+    if not os.path.exists(MEMBER_SNAP):
+        return ""
+    try:
+        rows = [r for r in csv.DictReader(open(MEMBER_SNAP, encoding="utf-8-sig")) if r.get("관객수")]
+    except Exception:
+        return ""
+    byday = {}
+    for r in rows:
+        d = r.get("날짜")
+        if d:
+            byday.setdefault(d, []).append((r.get("수집시각", "")[11:16], _num(r.get("관객수")) or 0))
+    if not byday:
+        return ""
+    day = sorted(byday)[-1]
+    ser = [p for p in byday[day] if p[0]]
+    # 시(hour) 단위로 압축: 같은 시각대 마지막값
+    comp = {}
+    for t, v in ser:
+        comp[t[:2]] = (t, v)
+    ser = [comp[k] for k in sorted(comp)]
+    if len(ser) < 2:
+        return ""
+    deltas = [(ser[i][0], ser[i][1] - ser[i - 1][1], ser[i][1]) for i in range(1, len(ser))]
+    n = len(deltas)
+    W, H, PT, PB = 680, 150, 22, 30
+    dmax = max((d for _, d, _c in deltas), default=1)
+    hi = max(dmax, 1)
+    plot_h = H - PT - PB
+    bw = (W - 12) / n
+    parts = [f'<line x1="6" x2="{W-6}" y1="{H-PB:.1f}" y2="{H-PB:.1f}" stroke="var(--line)" stroke-width="1"/>']
+    for i, (t, d, cum_i) in enumerate(deltas):
+        cx = 6 + i * bw
+        bh = max(abs(d) / hi * plot_h, 0.8)
+        by = H - PB - bh
+        col = "#7ee0a8" if d >= 0 else "#e06a6a"
+        parts.append(f'<rect x="{cx + bw*0.16:.1f}" y="{by:.1f}" width="{bw*0.68:.1f}" height="{bh:.1f}" '
+                     f'rx="1.5" fill="{col}"><title>{day} {t} · +{d:,} · 누적 {cum_i:,}</title></rect>')
+        mid = cx + bw / 2
+        parts.append(f'<text x="{mid:.1f}" y="{by-3:.1f}" text-anchor="middle" fill="var(--ink)" '
+                     f'font-size="10.5" font-weight="700">{d:+,}</text>')
+        parts.append(f'<text x="{mid:.1f}" y="{H-16:.1f}" text-anchor="middle" fill="var(--muted)" '
+                     f'font-size="9.5" font-weight="600">{cum_i:,}</text>')
+        parts.append(f'<text x="{mid:.1f}" y="{H-4:.1f}" text-anchor="middle" fill="var(--muted)" '
+                     f'font-size="9">{t}</text>')
+    svg = (f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block;height:auto;overflow:visible">'
+           f'{"".join(parts)}</svg>')
+    return (f'<div class="panel"><h2>오늘({day[5:]}) 실관객 시간대별 증가 (막대=시간당 유입 · 아래=그 시점 누적)</h2>{svg}'
+            f'<div class="empty" style="padding:8px 0 0;text-align:left">회원통계 수집 간격의 실관객 순유입입니다. '
+            f'낮·저녁 유입 패턴을 보고 아래 \'오늘 예상 마감\'과 함께 읽으면 흐름이 잡힙니다.</div></div>')
+
+
 def _eod_member_forecast():
     """회원통계 실관객 + 개봉일 시간대 누적 프로파일로 '오늘 마감 실관람' 역산.
     하루가 진행될수록(프로파일→1.0) 예측이 현재값에 수렴해 자동으로 좁혀진다."""
@@ -498,33 +559,24 @@ def _eod_member_forecast():
     if aud < 200:
         return None
     # 수집 시각(시)
+    dow = None
     try:
         snaps = list(csv.DictReader(open(MEMBER_SNAP, encoding="utf-8-sig")))
         ts = snaps[-1].get("수집시각", "")
         dt = datetime.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
         h = dt.hour + dt.minute / 60.0
+        dow = dt.weekday()
     except Exception:
         h = datetime.datetime.now().hour + 0.0
-    # 시각→그날 실관객 누적 비중. 그린랜드2 15일 회원통계 실측 곡선(관객/그날최종 평균).
-    # 출처: benchmarks/greenland2/member_snapshots.csv. 정시 앵커, 분은 선형보간.
-    # 주의: 그린랜드2 첫날은 오전 미수집이라 이 곡선은 전체일 평균이다(개봉일은 선예매가
-    # 더 몰려 오전 비중이 다소 높을 수 있음 → 개봉일 오전엔 최종이 약간 과대추정될 여지).
-    GL2 = {0: .435, 1: .412, 2: .413, 3: .417, 4: .413, 5: .413, 6: .414, 7: .417,
-           8: .432, 9: .522, 10: .594, 11: .614, 12: .655, 13: .722, 14: .768,
-           15: .815, 16: .854, 17: .890, 18: .922, 19: .951, 20: .972, 21: .988,
-           22: .996, 23: 1.0}
-    hh = int(h)
-    if hh >= 23:
-        f = 1.0
-    else:
-        f0, f1 = GL2[hh], GL2.get(hh + 1, 1.0)
-        f = f0 + (f1 - f0) * (h - hh)
+    # 시각→그날 실관객 누적 비중(요일보정: 금~일은 주말 곡선). 저녁으로 갈수록 실측에 수렴.
+    f = _intra_frac(h, dow)
     hw = 0.05 * (1 - f) + 0.01          # 오전은 넓게, 저녁으로 갈수록 촘촘하게
     pred = aud / f
     lo = aud / min(1.0, f + hw)
     hi = aud / max(0.32, f - hw)
     r100 = lambda n: int(round(n / 100.0) * 100)
-    return {"pred": r100(pred), "lo": r100(lo), "hi": r100(hi),
+    wk = "주말곡선" if (dow is not None and dow >= 4) else "평일곡선"
+    return {"pred": r100(pred), "lo": r100(lo), "hi": r100(hi), "wk": wk,
             "aud": aud, "hm": f"{int(h):02d}:{int((h%1)*60):02d}", "frac": f}
 
 
@@ -546,7 +598,7 @@ def _eod_member_card():
                f'<small>(comp 페이싱·모델)</small> vs 실측 나우캐스트 {f["pred"]:,}명 — {tag}</div>')
     return (f'<div class="eodm"><div class="eodh">🎯 오늘 예상 마감 관객 (실관람)<span>{f["hm"]} 기준</span></div>'
             f'<div class="eodv">약 {f["pred"]:,}<small>명 ({f["lo"]:,}~{f["hi"]:,})</small></div>'
-            f'<div class="eodn">현재 실관객 {f["aud"]:,} · 그린랜드2 실측 시간대 곡선 역산(현재 {f["frac"]*100:.0f}% 지점, 후행형)</div>'
+            f'<div class="eodn">현재 실관객 {f["aud"]:,} · 그린랜드2 {f.get("wk","")} 역산(현재 {f["frac"]*100:.0f}% 지점, 요일보정)</div>'
             f'{cmp}</div>')
 
 
@@ -715,6 +767,7 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__SPARK__", spark or '<div class="empty">예매 추세는 수집이 몇 시간 쌓이면 표시됩니다</div>')
     html = html.replace("__FINAL__", _final_card())
     html = html.replace("__DAILYREPORT__", _daily_report_card())
+    html = html.replace("__MEMBERDELTA__", _member_delta_section())
     html = html.replace("__EODMEMBER__", _eod_member_card())
     html = html.replace("__EODCARD__", _eod_card())
     html = html.replace("__MEMBER__", _member_section())
@@ -862,6 +915,8 @@ _TPL = """<!doctype html>
   __FINAL__
 
   __DAILYREPORT__
+
+  __MEMBERDELTA__
 
   __EODMEMBER__
 
