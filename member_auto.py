@@ -42,7 +42,34 @@ def login():
     op.open(urllib.request.Request(BASE + "/kobis/j_login?" + urllib.parse.urlencode({"j_username": uid, "j_password": pw}),
             data=b'{t:1}', headers={"Accept": "application/extJs+sua", "Content-Type": "application/extJs+sua"},
             method="POST"), timeout=30).read()
+    _defer_pw_change(op)   # KOBIS 강제 비번변경 인터스티셜 → '다음에 변경하기'(연기) 자동 통과
     return op
+
+
+def _defer_pw_change(op):
+    """로그인 후 '비밀번호 변경' 강제 화면이 뜨면 '다음에 변경하기'(updateType=next,
+    빈 비번)를 눌러 이번 세션을 통과시킨다. 실제 비번은 바꾸지 않음. 실패해도 진행."""
+    try:
+        g = op.open(BASE + "/kobis/business/mast/thea/findCompanyStat.do", timeout=30).read().decode("utf-8", "replace")
+        if "btn_pw_next" not in g and "비밀번호 변경" not in g:
+            return  # 인터스티셜 없음 → 정상
+        m = re.search(r'name="CSRFToken"[^>]*value="([^"]+)"', g)
+        tok = m.group(1) if m else ""
+        q = urllib.parse.urlencode({"cur_pw": "", "new_pw": "", "new_pw_confirm": "",
+                                    "updateType": "next", "CSRFToken": tok})
+        for path in ("/kobis/business/comm/user/updateUserNewPw.do",
+                     "/kobis/business/mast/thea/updateUserNewPw.do"):
+            try:
+                r = op.open(urllib.request.Request(BASE + path + "?" + q,
+                    headers={"Accept": "application/json+sua", "X-Requested-With": "XMLHttpRequest"}),
+                    timeout=30).read().decode("utf-8", "replace")
+                if "SUCCESS" in r:
+                    print("비번변경 연기(다음에 변경하기) 통과")
+                    return
+            except Exception:
+                continue
+    except Exception as e:
+        print("비번변경 연기 시도 실패(무시):", str(e)[:60])
 
 
 def _post(op, path, extra, date_str):
