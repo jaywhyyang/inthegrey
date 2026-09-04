@@ -284,6 +284,14 @@ def _daily_report_card():
     txt = (d.get("text") or "").strip()
     if not txt:
         return ""
+    # 이 카드는 세션에서 build_daily_report.py를 돌려야 갱신된다.
+    # 안 돌리면 옛 날짜 리포트가 계속 상단에 남으므로, 어제 것이 아니면 아예 안 띄운다.
+    try:
+        rd = datetime.date.fromisoformat(str(d.get("date", "")).strip())
+        if (datetime.date.today() - rd).days > 1:
+            return ""
+    except Exception:
+        return ""
     paras = [p.strip() for p in txt.split("\n\n") if p.strip()]
     head = re.sub(r"\*([^*]+)\*", r"\1", paras[0]).replace("📊", "").strip()
     parts = []
