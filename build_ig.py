@@ -194,6 +194,113 @@ def _short_theater(name):
     return name
 
 
+_REGION_POS = {
+    "서울특별시": (126, 86, "서울"), "인천광역시": (92, 96, "인천"),
+    "경기도": (150, 114, "경기"), "강원도": (216, 80, "강원"),
+    "강원특별자치도": (216, 80, "강원"),
+    "충청북도": (178, 146, "충북"), "세종특별자치시": (138, 158, "세종"),
+    "대전광역시": (158, 176, "대전"), "충청남도": (104, 160, "충남"),
+    "경상북도": (218, 150, "경북"), "대구광역시": (208, 182, "대구"),
+    "울산광역시": (252, 198, "울산"), "부산광역시": (238, 220, "부산"),
+    "경상남도": (192, 212, "경남"), "전라북도": (132, 196, "전북"),
+    "전북특별자치도": (132, 196, "전북"),
+    "광주광역시": (106, 232, "광주"), "전라남도": (122, 252, "전남"),
+    "제주도": (110, 316, "제주"), "제주특별자치도": (110, 316, "제주"),
+}
+
+
+def _daily_trend_section():
+    """일별 추이 Chart.js 라인/막대 차트(그린랜드2 부활) — 일별 실관객·누적·편성·회당."""
+    if not os.path.exists(MEMBER_SNAP):
+        return ""
+    try:
+        rows = [r for r in csv.DictReader(open(MEMBER_SNAP, encoding="utf-8-sig")) if r.get("관객수")]
+    except Exception:
+        return ""
+    byday = {}
+    for r in rows:
+        d = r.get("날짜")
+        if not d:
+            continue
+        b = byday.setdefault(d, {"aud": 0, "cum": 0, "scr": 0, "shows": 0})
+        b["aud"] = max(b["aud"], _num(r.get("관객수")) or 0)
+        b["cum"] = max(b["cum"], _num(r.get("누적관객수")) or 0)
+        b["scr"] = max(b["scr"], _num(r.get("스크린수")) or 0)
+        b["shows"] = max(b["shows"], _num(r.get("상영횟수")) or 0)
+    dates = sorted(byday)
+    if len(dates) < 1:
+        return ""
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    data = []
+    for d in dates:
+        b = byday[d]
+        data.append({"d": d[5:], "aud": b["aud"], "cum": b["cum"], "scr": b["scr"],
+                     "shows": b["shows"], "per": round(b["aud"] / b["shows"], 1) if b["shows"] else 0,
+                     "live": d == today})
+    payload = json.dumps(data, ensure_ascii=False)
+    return (
+        '<div class="panel"><h2>📈 일별 추이 (실관객·누적·편성)</h2>'
+        '<div class="cbox"><canvas id="c_daily"></canvas></div>'
+        '<div class="cbox" style="margin-top:10px"><canvas id="c_supply"></canvas></div>'
+        '<div class="empty" style="padding:6px 0 0;text-align:left">막대=그날 실관객/편성, 선=누적/회당관객. 옅은 막대=진행 중(오늘).</div></div>'
+        '<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>'
+        '<script>(function(){var D=' + payload + ';'
+        'if(!window.Chart||!D.length)return;'
+        'Chart.defaults.color="#9aa2b0";Chart.defaults.font.size=11;'
+        'var lb=D.map(function(x){return x.d});'
+        'var barCol=D.map(function(x){return x.live?"rgba(139,157,255,.4)":"rgba(139,157,255,.85)"});'
+        'var scrCol=D.map(function(x){return x.live?"rgba(126,224,168,.4)":"rgba(126,224,168,.85)"});'
+        'var gx={grid:{color:"rgba(255,255,255,.06)"}};'
+        'new Chart(document.getElementById("c_daily"),{data:{labels:lb,datasets:['
+        '{type:"bar",label:"일별 실관객",data:D.map(function(x){return x.aud}),backgroundColor:barCol,yAxisID:"y",order:2},'
+        '{type:"line",label:"누적 실관객",data:D.map(function(x){return x.cum}),borderColor:"#f4c89a",backgroundColor:"#f4c89a",tension:.3,yAxisID:"y2",order:1}'
+        ']},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{boxWidth:12}}},'
+        'scales:{x:gx,y:{position:"left",grid:gx.grid,title:{display:true,text:"일별"}},'
+        'y2:{position:"right",grid:{display:false},title:{display:true,text:"누적"}}}}});'
+        'new Chart(document.getElementById("c_supply"),{data:{labels:lb,datasets:['
+        '{type:"bar",label:"편성(상영관)",data:D.map(function(x){return x.scr}),backgroundColor:scrCol,yAxisID:"y",order:2},'
+        '{type:"line",label:"회당 관객",data:D.map(function(x){return x.per}),borderColor:"#8b9dff",backgroundColor:"#8b9dff",tension:.3,yAxisID:"y2",order:1}'
+        ']},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{boxWidth:12}}},'
+        'scales:{x:gx,y:{position:"left",grid:gx.grid,title:{display:true,text:"상영관"}},'
+        'y2:{position:"right",grid:{display:false},title:{display:true,text:"회당"}}}}});'
+        '})();</script>')
+
+
+def _region_map():
+    """지역별 관객 규모 지도 — 위치형 버블 SVG(그린랜드2 부활)."""
+    try:
+        det = json.load(io.open(MEMBER_DETAIL, encoding="utf-8"))
+    except Exception:
+        return ""
+    regions = det.get("regions") or []
+    if not regions:
+        return ""
+    audmax = max((r[1] for r in regions), default=1) or 1
+
+    def color(a):
+        t = (a / audmax) ** 0.6
+        c0, c1 = (0x33, 0x41, 0x55), (0xef, 0x44, 0x44)
+        return "#%02x%02x%02x" % tuple(int(c0[i] + (c1[i] - c0[i]) * t) for i in range(3))
+
+    body = ""
+    for r in regions:
+        name, aud = r[0], r[1]
+        if name not in _REGION_POS:
+            continue
+        x, y, lbl = _REGION_POS[name]
+        rad = 8 + (aud / audmax) ** 0.5 * 24
+        body += (f'<circle cx="{x}" cy="{y}" r="{rad:.1f}" fill="{color(aud)}" fill-opacity="0.82" '
+                 f'stroke="#0f1117" stroke-width="1"><title>{name} · 관객 {aud:,}</title></circle>'
+                 f'<text x="{x}" y="{y-1}" text-anchor="middle" font-size="9" fill="#fff" font-weight="bold">{lbl}</text>'
+                 f'<text x="{x}" y="{y+9}" text-anchor="middle" font-size="8" fill="#e7e9ee">{aud:,}</text>')
+    if not body:
+        return ""
+    svg = f'<svg viewBox="0 0 300 340" style="width:100%;max-width:420px;display:block;margin:6px auto">{body}</svg>'
+    return ('<div class="panel"><h2>🗺️ 지역별 관객 규모 지도</h2>' + svg +
+            '<div class="empty" style="padding:6px 0 0;text-align:left">원 크기·색 = 관객수(<b style="color:#ef4444">빨강=많음</b>). '
+            '어디서 많이 보는지 한눈에.</div></div>')
+
+
 def _member_section():
     """회원통계(실관객) 섹션 — 개봉 후 데이터가 있을 때만 렌더(없으면 빈 문자열)."""
     try:
@@ -771,6 +878,8 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__EODMEMBER__", _eod_member_card())
     html = html.replace("__EODCARD__", _eod_card())
     html = html.replace("__MEMBER__", _member_section())
+    html = html.replace("__REGIONMAP__", _region_map())
+    html = html.replace("__DAILYTREND__", _daily_trend_section())
     html = html.replace("__COMMENT__", _ai_comment())
     html = html.replace("__COOPEN__", _coopen_section())
     html = html.replace("__UPD__", upd or "수집 대기 중")
@@ -812,6 +921,7 @@ _TPL = """<!doctype html>
   .panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px;margin-top:12px}
   .panel h2{font-size:14px;font-weight:750;margin-bottom:10px;color:var(--muted);letter-spacing:.02em}
   .empty{color:var(--muted);font-size:13px;text-align:center;padding:30px 0}
+  .cbox{position:relative;height:210px;width:100%}
   .band{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:13px}
   .bar{flex:1;height:8px;border-radius:99px;background:linear-gradient(90deg,#3a4260,#8b9dff);position:relative}
   .foot{text-align:center;color:var(--muted);font-size:11.5px;margin-top:22px;line-height:1.7}
@@ -925,6 +1035,10 @@ _TPL = """<!doctype html>
   __COMMENT__
 
   __MEMBER__
+
+  __DAILYTREND__
+
+  __REGIONMAP__
 
   <div class="panel">
     <h2>시간당 예매 순증 (막대=순증분 · 아래=그 시점 누적)</h2>
