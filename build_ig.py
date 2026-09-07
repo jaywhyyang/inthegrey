@@ -564,15 +564,19 @@ def _final_forecast():
             lean = f"이튿날/첫날 {ratio:.2f}로 comp(0.73)보다 빨라 하단 반영"
     lo = int(round(central * 0.8 / 1000) * 1000)
     hi = int(round(central * 1.35 / 1000) * 1000)
-    # 주말 선예매(최신 스냅샷)
+    # 다가오는 선예매(오늘 이후 날짜만 · 계속 유입 신호). 지난 날짜는 실관객 최종이 정답이라 제외.
     wk = {}
     try:
         fa = json.load(io.open(os.path.join(BASE, "future_advance_log.json"), encoding="utf-8"))
-        for tgt in ("2026-09-05", "2026-09-06", "2026-09-07"):
+        today_s = cur_date.strftime("%Y-%m-%d")
+        for tgt in sorted(fa.keys()):
+            if tgt <= today_s:
+                continue
             snaps_t = fa.get(tgt, {})
             if snaps_t:
-                latest = sorted(snaps_t.items())[-1][1]
-                wk[tgt] = latest.get("aud")
+                a = sorted(snaps_t.items())[-1][1].get("aud")
+                if a:
+                    wk[tgt] = a
     except Exception:
         pass
     return {"central": int(round(central / 100) * 100), "lo": lo, "hi": hi,
@@ -587,8 +591,13 @@ def _final_card():
     wk = f.get("weekend") or {}
     wkstr = ""
     if wk:
-        names = {"2026-09-05": "금", "2026-09-06": "토", "2026-09-07": "일"}
-        wkstr = " · ".join(f"{names[k]} {v:,}" for k, v in wk.items() if v)
+        _dn = ["월", "화", "수", "목", "금", "토", "일"]
+        def _lbl(k):
+            try:
+                return _dn[datetime.datetime.strptime(k, "%Y-%m-%d").weekday()]
+            except Exception:
+                return k[5:]
+        wkstr = " · ".join(f"{_lbl(k)} {v:,}" for k, v in sorted(wk.items()) if v)
     parts = []
     if f["final_pace"]:
         parts.append(f"{f['day_n']}일차 누적 {f['cum']:,} ÷ 페이싱 → {f['final_pace']/10000:.1f}만")
@@ -596,7 +605,7 @@ def _final_card():
         parts.append(f"개봉일 모델 {f['final_model']/10000:.1f}만")
     sub = " · ".join(parts)
     lean = f' · {f["lean"]}' if f.get("lean") else ""
-    wkline = (f'<div class="ffwk">주말 선예매(계속 유입): {wkstr}</div>' if wkstr else "")
+    wkline = (f'<div class="ffwk">다가오는 선예매(계속 유입): {wkstr}</div>' if wkstr else "")
     return (f'<div class="ff"><div class="ffh">🏁 생애 최종 관객 예측 <span>진행 중 · {f["day_n"]}일차</span></div>'
             f'<div class="ffv">약 {f["central"]:,}<small>명 ({f["lo"]:,}~{f["hi"]:,})</small></div>'
             f'<div class="ffn">{sub}{lean}</div>{wkline}'
