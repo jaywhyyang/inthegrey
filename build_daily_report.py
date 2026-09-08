@@ -109,28 +109,40 @@ def build(target=None, dry=False):
     final_model = math.exp(a + b * math.log(open_admits)) if (a and b and open_admits > 0) else None
     d1f = pac.get("D1")
     final_pace = open_admits / d1f if d1f else None
-    # D3 판정
+    # 대시보드와 동일한 최종(감쇠·주말반등 반영). 리포트=대시보드 숫자 일치.
+    final_use, final_lo, final_hi = final_model, None, None
+    try:
+        import build_ig as BG
+        ff = BG._final_forecast()
+        if ff and ff.get("central"):
+            final_use = ff["central"]; final_lo = ff.get("lo"); final_hi = ff.get("hi")
+    except Exception:
+        pass
+    # 판정: 개봉 초반(D3~4)에만 의미. 모델 최종 대비 누적비중으로 성향 판별.
     verdict = None
-    if day_n >= 3 and final_model:
+    if 3 <= day_n <= 4 and final_model:
         frac = cum / final_model
         verdict = ("즉시소진형(개봉 몰아보기)" if frac > 0.40 else
                    "롱런형(주말·입소문 견인)" if frac < 0.34 else "경계(즉시소진~롱런 사이)")
 
-    # 자가점검(어제에 대해 우리가 로그해둔 예측)
-    pred = st["predictions"].get(ys)
-    # 다음날 예측 로그(자가점검용): 페이싱 곡선의 일별 증분 × 모델 최종
-    nd = y + datetime.timedelta(days=1)
-    if final_model and pac:
-        nn = day_n + 1
-        pd = (_pcum(nn, pac) - _pcum(nn - 1, pac)) * final_model
-        st["predictions"][nd.strftime("%Y-%m-%d")] = int(round(max(0, pd) / 100.0) * 100)
+    # 자가점검은 '대시보드가 실제로 낸 그날 마감 나우캐스트'로 채점(페이싱 모델이 아니라 우리가 공개한 예측).
+    # 매 실행 시 오늘자 나우캐스트를 로그 → 다음날 정직하게 대조. 로그가 없는 날은 자가점검 줄을 생략.
+    st.setdefault("dash_pred", {})
+    pred = st["dash_pred"].get(ys)
+    try:
+        import build_ig as BG2
+        today_now = BG2._eod_member_forecast()
+        if today_now and today_now.get("pred"):
+            st["dash_pred"][datetime.date.today().strftime("%Y-%m-%d")] = int(today_now["pred"])
+    except Exception:
+        pass
 
     ctx = dict(ys=ys, dow=DOW[y.weekday()], day_n=day_n, daily=daily, cum=cum, shows=shows,
                screens=screens, sales=sales, per_show=per_show, prev=prev,
                theaters=det.get("theaters", []), regions=det.get("regions", []),
                slots=det.get("slots", []), open_admits=open_admits,
                final_model=final_model, final_pace=final_pace, verdict=verdict, pred=pred,
-               band=band)
+               final_use=final_use, final_lo=final_lo, final_hi=final_hi, band=band)
     text = _prose(ctx)
     payload = {"date": ys, "day_n": day_n, "daily": daily, "cum": cum,
                "final_model": int(final_model) if final_model else None,
@@ -187,22 +199,21 @@ def _prose(c):
         else:
             why = "선예매가 앞당겨져 예측이 부풀었" if err > 0 else "주말·현매 유입을 과소평가했"
             P.append(f"*예측 자가점검.* 어제 예상은 약 {c['pred']:,}명, 실제 {c['daily']:,}명으로 {err:+.0f}% 빗나갔습니다 — {why}던 것으로 보입니다. 예측 규칙을 계속 보정 중입니다.")
-    # 최종
-    if c["final_model"]:
-        pieces = [f"회귀모델 최종 *약 {_man(c['final_model'])}명*"]
-        if c["final_pace"]:
-            pieces.append(f"페이싱 역산 약 {_man(c['final_pace'])}명")
-        it = c["band"].get("model", {}).get("interval_68")
-        lim = ""
-        if it:
-            lo = c["final_model"] * it[0]; hi = c["final_model"] * it[1]
-            lim = f" 다만 68% 구간이 {_man(lo)}~{_man(hi)}으로 넓고(표본 적음), "
-        wk = "첫 주말이 아직 안 왔다는 점" if c["day_n"] <= 3 else "주말·평일 리듬"
-        P.append(f"*최종 전망.* 개봉일 {c['open_admits']:,}명 기준 {', '.join(pieces)}으로 겹칩니다(밴드 하단~중심)."
-                 f"{lim}{wk}을 함께 감안해야 합니다.")
-    # D3 판정
+    # 최종(대시보드와 동일: 감쇠·주말반등 반영값)
+    if c["final_use"]:
+        rng = ""
+        if c["final_lo"] and c["final_hi"]:
+            rng = f"(대략 {_man(c['final_lo'])}~{_man(c['final_hi'])})"
+        ref = ""
+        if c["final_model"]:
+            ref = f" 개봉일 회귀모델 단독으로는 약 {_man(c['final_model'])}명이나, 이튿날 이후 감쇠와 주말·평일 리듬을 반영해 하향한 값입니다."
+        wk = "첫 주말이 아직 안 왔다는 점" if c["day_n"] <= 3 else "남은 평일·주말 리듬"
+        P.append(f"*최종 전망.* 개봉일 {c['open_admits']:,}명과 {c['day_n']}일차 누적 {c['cum']:,}명을 함께 반영한 "
+                 f"현재 생애 최종 예측은 *약 {_man(c['final_use'])}명* {rng}입니다(밴드 하단~중심)."
+                 f"{ref} 표본이 적어 구간이 넓으니 {wk}을 함께 감안해야 합니다.")
+    # 성향 판정(개봉 초반에만)
     if c["verdict"]:
-        P.append(f"*3일차 판정.* 누적/최종 비중으로 보면 현재는 *{c['verdict']}*에 가깝습니다.")
+        P.append(f"*{c['day_n']}일차 판정.* 누적/최종 비중으로 보면 현재는 *{c['verdict']}*에 가깝습니다.")
     # 생각할 거리
     P.append("*생각할 거리.* 편성 축소가 수요를 따라간 조정인지, 극장이 성급히 뺀 것인지는 "
              "주말 좌석판매율로 갈립니다. 관을 넓히기보다 잘 드는 극장·시간대에 회차를 몰아주는 게 "
