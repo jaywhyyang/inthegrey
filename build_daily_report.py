@@ -152,6 +152,17 @@ def build(target=None, dry=False):
     if not dry:
         json.dump(payload, io.open(OUT_JSON, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
         json.dump(st, io.open(STATE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        # 일자별 무료관객 확정치 upsert(대시보드 상시 노출용)
+        try:
+            free = MI._num(str(summ.get("무료관객수"))) or 0
+            fp = os.path.join(BASE, "daily_free.json")
+            fd = {}
+            if os.path.exists(fp):
+                fd = json.load(io.open(fp, encoding="utf-8"))
+            fd[ys] = {"total": daily, "paid": daily - free, "free": free}
+            json.dump(fd, io.open(fp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        except Exception:
+            pass
         _post_slack(text)
     return text
 

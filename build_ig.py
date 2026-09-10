@@ -266,6 +266,61 @@ def _daily_trend_section():
         '})();</script>')
 
 
+def _free_by_day_section():
+    """일자별 무료관객(초대·무료시사 등) — 확정치 daily_free.json + 오늘 진행분(스냅샷) 오버레이."""
+    path = os.path.join(BASE, "daily_free.json")
+    data = {}
+    try:
+        data = json.load(io.open(path, encoding="utf-8"))
+    except Exception:
+        pass
+    # 오늘 진행분은 스냅샷 최신값으로 라이브 오버레이(확정 전)
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    live_today = False
+    try:
+        rows = [r for r in csv.DictReader(open(MEMBER_SNAP, encoding="utf-8-sig")) if r.get("날짜") == today]
+        if rows:
+            last = rows[-1]
+            tot = _num(last.get("관객수")) or 0
+            fr = _num(last.get("무료관객수")) or 0
+            if tot:
+                data[today] = {"total": tot, "paid": tot - fr, "free": fr}
+                live_today = True
+    except Exception:
+        pass
+    if not data:
+        return ""
+    dow = ["월", "화", "수", "목", "금", "토", "일"]
+    dates = sorted(data)
+    tf = sum(data[d].get("free", 0) for d in dates)
+    tt = sum(data[d].get("total", 0) for d in dates)
+    trs = []
+    for d in dates:
+        v = data[d]
+        t = v.get("total", 0); f = v.get("free", 0)
+        try:
+            wd = dow[datetime.datetime.strptime(d, "%Y-%m-%d").weekday()]
+        except Exception:
+            wd = ""
+        live = (d == today and live_today)
+        pct = f"{f / t * 100:.1f}%" if t else "-"
+        tag = ' <span style="color:#8b9dff">(진행 중)</span>' if live else ""
+        trs.append(f'<tr><td>{d[5:]}({wd}){tag}</td><td style="text-align:right">{t:,}</td>'
+                   f'<td style="text-align:right;font-weight:600">{f:,}</td><td style="text-align:right;color:#9aa2b0">{pct}</td></tr>')
+    tot_pct = f"{tf / tt * 100:.1f}%" if tt else "-"
+    return (
+        '<div class="panel"><h2>🎟️ 일자별 무료관객</h2>'
+        '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+        '<tr style="color:#9aa2b0;border-bottom:1px solid rgba(255,255,255,.1)">'
+        '<td>날짜</td><td style="text-align:right">총 실관객</td><td style="text-align:right">무료</td><td style="text-align:right">무료%</td></tr>'
+        + "".join(trs) +
+        f'<tr style="border-top:1px solid rgba(255,255,255,.15);font-weight:600">'
+        f'<td>누계</td><td style="text-align:right">{tt:,}</td><td style="text-align:right">{tf:,}</td><td style="text-align:right">{tot_pct}</td></tr>'
+        '</table>'
+        '<div class="empty" style="padding:8px 0 0;text-align:left">KOBIS 회원통계 기준 무료관객(초대권·무료시사 등). '
+        '프로모션 티켓은 대개 대금 정산 구조라 \'유료\'로 잡혀 이 수치와 다를 수 있습니다.</div></div>')
+
+
 def _region_map():
     """지역별 관객 규모 지도 — 위치형 버블 SVG(그린랜드2 부활)."""
     try:
@@ -889,6 +944,7 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__MEMBER__", _member_section())
     html = html.replace("__REGIONMAP__", _region_map())
     html = html.replace("__DAILYTREND__", _daily_trend_section())
+    html = html.replace("__FREEBYDAY__", _free_by_day_section())
     html = html.replace("__COMMENT__", _ai_comment())
     html = html.replace("__COOPEN__", _coopen_section())
     html = html.replace("__UPD__", upd or "수집 대기 중")
@@ -1046,6 +1102,8 @@ _TPL = """<!doctype html>
   __MEMBER__
 
   __DAILYTREND__
+
+  __FREEBYDAY__
 
   __REGIONMAP__
 
