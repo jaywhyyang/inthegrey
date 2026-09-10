@@ -94,7 +94,9 @@ def build(target=None, dry=False):
 
     st = _load(STATE, {"open_admits": None, "finals": {}, "predictions": {}, "screens": {}})
     # 전일(감소율용)
-    prev = st["finals"].get((y - datetime.timedelta(days=1)).strftime("%Y-%m-%d"))
+    prev_ds = (y - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+    prev = st["finals"].get(prev_ds)
+    prev_screens = st.get("screens", {}).get(prev_ds)
     st["finals"][ys] = daily
     st["screens"][ys] = screens
     if day_n == 1:
@@ -140,7 +142,7 @@ def build(target=None, dry=False):
     ctx = dict(ys=ys, dow=DOW[y.weekday()], day_n=day_n, daily=daily, cum=cum, shows=shows,
                screens=screens, sales=sales, per_show=per_show, prev=prev,
                theaters=det.get("theaters", []), regions=det.get("regions", []),
-               slots=det.get("slots", []), open_admits=open_admits,
+               slots=det.get("slots", []), open_admits=open_admits, prev_screens=prev_screens,
                final_model=final_model, final_pace=final_pace, verdict=verdict, pred=pred,
                final_use=final_use, final_lo=final_lo, final_hi=final_hi, band=band)
     text = _prose(ctx)
@@ -168,7 +170,12 @@ def _prose(c):
     # 감소/증가
     if c["prev"]:
         ch = (c["daily"] - c["prev"]) / c["prev"] * 100
-        if ch <= -35:
+        ps = c.get("prev_screens")
+        scr_ch = (c["screens"] - ps) / ps * 100 if (ps and c["screens"]) else 0
+        if ch <= -35 and scr_ch <= -25:
+            P.append(f"전일 대비 *{ch:+.0f}%*로 크게 줄었는데, 같은 날 상영 규모도 {ps}개 관에서 {c['screens']}개 관으로 "
+                     f"축소됐습니다({scr_ch:+.0f}%) — 수요가 식었다기보다 편성(볼 수 있는 자리) 축소의 영향이 큽니다.")
+        elif ch <= -35:
             P.append(f"전일 대비 *{ch:+.0f}%*로 감소가 가파릅니다 — 초반에 수요가 앞으로 몰리는 즉시소진 성향을 시사합니다.")
         elif ch < 0:
             P.append(f"전일 대비 {ch:+.0f}%로 완만히 줄었습니다 — 급격한 이탈은 아닙니다.")
