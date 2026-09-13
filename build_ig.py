@@ -266,6 +266,53 @@ def _daily_trend_section():
         '})();</script>')
 
 
+def _daily_slot_heatmap():
+    """일별 × 회차(시간대) 실관객 히트맵 — member_detail_history 기반, 매시간 자동 갱신(배급사 공유용)."""
+    path = os.path.join(BASE, "member_detail_history.json")
+    try:
+        hist = json.load(io.open(path, encoding="utf-8"))
+    except Exception:
+        return ""
+    dates = sorted(d for d in hist if d.startswith("2026"))
+    if not dates:
+        return ""
+    dow = ["월", "화", "수", "목", "금", "토", "일"]
+    maxslot = max((len(hist[d].get("slots") or []) for d in dates), default=8)
+    # 색 스케일 기준: 전체 셀 최댓값
+    cellmax = 1
+    for d in dates:
+        for v in (hist[d].get("slots") or []):
+            cellmax = max(cellmax, v or 0)
+
+    def _wd(d):
+        try:
+            return dow[datetime.datetime.strptime(d, "%Y-%m-%d").weekday()]
+        except Exception:
+            return ""
+
+    def cell(v):
+        v = v or 0
+        a = round((v / cellmax) ** 0.6, 3) if cellmax else 0
+        bg = f"rgba(139,157,255,{a})" if v else "transparent"
+        return f'<td style="text-align:center;background:{bg};border:1px solid rgba(255,255,255,.06)">{v or ""}</td>'
+
+    head = "".join(f'<td style="text-align:center">{i+1}회</td>' for i in range(maxslot))
+    rows = []
+    for d in dates:
+        sl = hist[d].get("slots") or []
+        tot = sum(sl)
+        cells = "".join(cell(sl[i] if i < len(sl) else 0) for i in range(maxslot))
+        rows.append(f'<tr><td style="white-space:nowrap">{d[5:]}({_wd(d)})</td>{cells}'
+                    f'<td style="text-align:right;font-weight:600">{tot:,}</td></tr>')
+    return (
+        '<div class="panel"><h2>🕒 일별 · 시간대(회차) 히트맵</h2>'
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+        f'<tr style="color:#9aa2b0;border-bottom:1px solid rgba(255,255,255,.1)"><td>날짜</td>{head}<td style="text-align:right">합계</td></tr>'
+        + "".join(rows) +
+        '</table></div>'
+        '<div class="empty" style="padding:8px 0 0;text-align:left">회차=상영 슬롯(대략 이른 시간대→늦은 시간대 순). 색이 진할수록 그 회차 실관객이 많음. 매시간 자동 갱신.</div></div>')
+
+
 def _free_by_day_section():
     """일자별 무료관객(초대·무료시사 등) — 확정치 daily_free.json + 오늘 진행분(스냅샷) 오버레이."""
     path = os.path.join(BASE, "daily_free.json")
@@ -945,6 +992,7 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__REGIONMAP__", _region_map())
     html = html.replace("__DAILYTREND__", _daily_trend_section())
     html = html.replace("__FREEBYDAY__", _free_by_day_section())
+    html = html.replace("__SLOTHEAT__", _daily_slot_heatmap())
     html = html.replace("__COMMENT__", _ai_comment())
     html = html.replace("__COOPEN__", _coopen_section())
     html = html.replace("__UPD__", upd or "수집 대기 중")
@@ -1102,6 +1150,8 @@ _TPL = """<!doctype html>
   __MEMBER__
 
   __DAILYTREND__
+
+  __SLOTHEAT__
 
   __FREEBYDAY__
 
