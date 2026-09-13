@@ -266,6 +266,64 @@ def _daily_trend_section():
         '})();</script>')
 
 
+def _daily_hourly_matrix():
+    """일별 × 시각(10~23시, 1시간 간격) 그날 누적 실관객 — 시간당 스냅샷 기반(배급사 요청)."""
+    if not os.path.exists(MEMBER_SNAP):
+        return ""
+    H0, H1 = 10, 23
+    byday = {}
+    try:
+        for r in csv.DictReader(open(MEMBER_SNAP, encoding="utf-8-sig")):
+            ts = r.get("수집시각", ""); d = r.get("날짜", "")
+            if not d.startswith("2026") or len(ts) < 13:
+                continue
+            try:
+                hr = int(ts[11:13])
+            except Exception:
+                continue
+            if hr < H0 or hr > H1:
+                continue
+            a = _num(r.get("관객수")) or 0
+            dd = byday.setdefault(d, {})
+            dd[hr] = max(dd.get(hr, 0), a)
+    except Exception:
+        return ""
+    dates = sorted(byday)
+    if not dates:
+        return ""
+    dow = ["월", "화", "수", "목", "금", "토", "일"]
+    cellmax = max((v for hh in byday.values() for v in hh.values()), default=1) or 1
+
+    def _wd(d):
+        try:
+            return dow[datetime.datetime.strptime(d, "%Y-%m-%d").weekday()]
+        except Exception:
+            return ""
+
+    def cell(v):
+        if not v:
+            return '<td style="border:1px solid rgba(255,255,255,.06)"></td>'
+        a = round((v / cellmax) ** 0.6, 3)
+        return (f'<td style="text-align:right;background:rgba(126,224,168,{a});'
+                f'border:1px solid rgba(255,255,255,.06)">{v:,}</td>')
+
+    head = "".join(f'<td style="text-align:right">{h}시</td>' for h in range(H0, H1 + 1))
+    rows = []
+    for d in dates:
+        hh = byday[d]
+        final = max(hh.values()) if hh else 0
+        cells = "".join(cell(hh.get(h, 0)) for h in range(H0, H1 + 1))
+        rows.append(f'<tr><td style="white-space:nowrap">{d[5:]}({_wd(d)})</td>{cells}'
+                    f'<td style="text-align:right;font-weight:600">{final:,}</td></tr>')
+    return (
+        '<div class="panel"><h2>⏱️ 일별 · 시각별 누적 관객 (1시간 간격)</h2>'
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+        f'<tr style="color:#9aa2b0;border-bottom:1px solid rgba(255,255,255,.1)"><td style="white-space:nowrap">날짜</td>{head}<td style="text-align:right">마감</td></tr>'
+        + "".join(rows) +
+        '</table></div>'
+        '<div class="empty" style="padding:8px 0 0;text-align:left">각 칸=그 시각까지 그날 누적 실관객(1시간 간격). 빈 칸은 수집 공백. 색이 진할수록 관객이 많음. 매시간 자동 갱신.</div></div>')
+
+
 def _daily_slot_heatmap():
     """일별 × 회차(시간대) 실관객 히트맵 — member_detail_history 기반, 매시간 자동 갱신(배급사 공유용)."""
     path = os.path.join(BASE, "member_detail_history.json")
@@ -993,6 +1051,7 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__DAILYTREND__", _daily_trend_section())
     html = html.replace("__FREEBYDAY__", _free_by_day_section())
     html = html.replace("__SLOTHEAT__", _daily_slot_heatmap())
+    html = html.replace("__HOURMATRIX__", _daily_hourly_matrix())
     html = html.replace("__COMMENT__", _ai_comment())
     html = html.replace("__COOPEN__", _coopen_section())
     html = html.replace("__UPD__", upd or "수집 대기 중")
@@ -1152,6 +1211,8 @@ _TPL = """<!doctype html>
   __DAILYTREND__
 
   __SLOTHEAT__
+
+  __HOURMATRIX__
 
   __FREEBYDAY__
 
