@@ -324,6 +324,81 @@ def _daily_hourly_matrix():
         '<div class="empty" style="padding:8px 0 0;text-align:left">각 칸=그 시각까지 그날 누적 실관객(1시간 간격). 빈 칸은 수집 공백. 색이 진할수록 관객이 많음. 매시간 자동 갱신.</div></div>')
 
 
+def _daily_hourly_delta():
+    """일별 × 시각(10~23시) 시간당 순증(그 시간 유입 인원) — 그날 누적의 시간차분."""
+    if not os.path.exists(MEMBER_SNAP):
+        return ""
+    H0, H1 = 10, 23
+    byday = {}
+    try:
+        for r in csv.DictReader(open(MEMBER_SNAP, encoding="utf-8-sig")):
+            ts = r.get("수집시각", ""); d = r.get("날짜", "")
+            if not d.startswith("2026") or len(ts) < 13:
+                continue
+            try:
+                hr = int(ts[11:13])
+            except Exception:
+                continue
+            a = _num(r.get("관객수")) or 0
+            dd = byday.setdefault(d, {})
+            dd[hr] = max(dd.get(hr, 0), a)   # 그 시각 그날 누적
+    except Exception:
+        return ""
+    dates = sorted(byday)
+    if not dates:
+        return ""
+    dow = ["월", "화", "수", "목", "금", "토", "일"]
+    # 시간당 순증 계산(이전 존재 시각 대비 차분; 자정~09시 선예매분은 10시 이전 마지막값을 기저로)
+    delta = {}
+    dmax = 1
+    for d in dates:
+        hh = byday[d]
+        prev = None
+        for h in range(0, 24):
+            if h in hh:
+                if prev is not None and H0 <= h <= H1:
+                    inc = hh[h] - hh[prev]
+                    delta.setdefault(d, {})[h] = inc
+                    if inc > dmax:
+                        dmax = inc
+                elif prev is None and H0 <= h <= H1:
+                    delta.setdefault(d, {})[h] = hh[h]  # 그날 첫 스냅샷=개장 전 유입 포함
+                    if hh[h] > dmax:
+                        dmax = hh[h]
+                prev = h
+
+    def _wd(d):
+        try:
+            return dow[datetime.datetime.strptime(d, "%Y-%m-%d").weekday()]
+        except Exception:
+            return ""
+
+    def cell(v):
+        if v is None:
+            return '<td style="border:1px solid rgba(255,255,255,.06)"></td>'
+        if v <= 0:
+            return f'<td style="text-align:right;color:#6b7280;border:1px solid rgba(255,255,255,.06)">{v}</td>'
+        a = round((v / dmax) ** 0.6, 3)
+        return (f'<td style="text-align:right;background:rgba(244,200,154,{a});'
+                f'border:1px solid rgba(255,255,255,.06)">+{v:,}</td>')
+
+    head = "".join(f'<td style="text-align:right">{h}시</td>' for h in range(H0, H1 + 1))
+    rows = []
+    for d in dates:
+        dm = delta.get(d, {})
+        peak = max(dm.values()) if dm else 0
+        cells = "".join(cell(dm.get(h)) for h in range(H0, H1 + 1))
+        rows.append(f'<tr><td style="white-space:nowrap">{d[5:]}({_wd(d)})</td>{cells}'
+                    f'<td style="text-align:right;font-weight:600">+{peak:,}</td></tr>')
+    return (
+        '<div class="panel"><h2>📈 일별 · 시간당 순증 (그 시간 유입)</h2>'
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+        f'<tr style="color:#9aa2b0;border-bottom:1px solid rgba(255,255,255,.1)"><td style="white-space:nowrap">날짜</td>{head}<td style="text-align:right">피크</td></tr>'
+        + "".join(rows) +
+        '</table></div>'
+        '<div class="empty" style="padding:8px 0 0;text-align:left">각 칸=직전 시각 대비 그 시간에 새로 든 실관객(순증). 10시 칸은 개장 전 선예매분 포함. 색이 진할수록 유입이 큼. 매시간 자동 갱신.</div></div>')
+
+
 def _daily_slot_heatmap():
     """일별 × 회차(시간대) 실관객 히트맵 — member_detail_history 기반, 매시간 자동 갱신(배급사 공유용)."""
     path = os.path.join(BASE, "member_detail_history.json")
@@ -1052,6 +1127,7 @@ def generate(csv_path=CSV_PATH, out_path=OUT_PATH):
     html = html.replace("__FREEBYDAY__", _free_by_day_section())
     html = html.replace("__SLOTHEAT__", _daily_slot_heatmap())
     html = html.replace("__HOURMATRIX__", _daily_hourly_matrix())
+    html = html.replace("__HOURDELTA__", _daily_hourly_delta())
     html = html.replace("__COMMENT__", _ai_comment())
     html = html.replace("__COOPEN__", _coopen_section())
     html = html.replace("__UPD__", upd or "수집 대기 중")
@@ -1213,6 +1289,8 @@ _TPL = """<!doctype html>
   __SLOTHEAT__
 
   __HOURMATRIX__
+
+  __HOURDELTA__
 
   __FREEBYDAY__
 
