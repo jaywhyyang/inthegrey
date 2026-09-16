@@ -186,8 +186,18 @@ def _prose(c):
         if ch <= -35 and scr_ch <= -25:
             P.append(f"전일 대비 *{ch:+.0f}%*로 크게 줄었는데, 같은 날 상영 규모도 {ps}개 관에서 {c['screens']}개 관으로 "
                      f"축소됐습니다({scr_ch:+.0f}%) — 수요가 식었다기보다 편성(볼 수 있는 자리) 축소의 영향이 큽니다.")
-        elif ch <= -35:
+        elif ch <= -35 and dn <= 4:
             P.append(f"전일 대비 *{ch:+.0f}%*로 감소가 가파릅니다 — 초반에 수요가 앞으로 몰리는 즉시소진 성향을 시사합니다.")
+        elif ch <= -35:
+            try:
+                _t = datetime.datetime.strptime(c["ys"], "%Y-%m-%d")
+                wd_t, wd_p = _t.weekday(), (_t - datetime.timedelta(days=1)).weekday()
+            except Exception:
+                wd_t = wd_p = None
+            if wd_p in (5, 6) and wd_t in (0, 1, 2, 3):
+                P.append(f"전일 대비 {ch:+.0f}%로 줄었지만, 주말(전일)에서 평일로 내려온 통상적인 낙폭입니다 — 급격한 이탈로 보긴 어렵습니다.")
+            else:
+                P.append(f"전일 대비 *{ch:+.0f}%*로 크게 줄었습니다 — 평일·tail 구간의 변동으로 보이며, 하루치라 단정은 이릅니다.")
         elif ch < -1:
             P.append(f"전일 대비 {ch:+.0f}%로 완만히 줄었습니다 — 급격한 이탈은 아닙니다.")
         elif ch <= 1:
