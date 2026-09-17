@@ -213,8 +213,14 @@ def _prose(c):
         seoul = next((r[1] for r in c["regions"] if "서울" in r[0]), 0)
         gg = next((r[1] for r in c["regions"] if "경기" in r[0]), 0)
         capital = (seoul + gg) / c["daily"] * 100 if c["daily"] else 0
-        P.append(f"관객은 대도시 도심에 집중됐습니다. 상위 극장은 {tstr}, 지역은 {rgstr}로 "
-                 f"수도권이 약 {capital:.0f}%를 차지했습니다.")
+        top_reg = c["regions"][0][0].replace("특별시", "").replace("광역시", "") if c["regions"] else ""
+        if capital >= 45:
+            lead = "관객은 대도시 도심(수도권)에 집중됐습니다."
+            tail_reg = f"수도권이 약 {capital:.0f}%를 차지했습니다."
+        else:
+            lead = f"이날은 수도권보다 지방에 몰렸습니다 — {top_reg} 중심입니다."
+            tail_reg = f"수도권 비중은 약 {capital:.0f}%에 그쳤습니다."
+        P.append(f"{lead} 상위 극장은 {tstr}, 지역은 {rgstr}로 {tail_reg}")
     sl = c["slots"]
     if sl and any(sl):
         peak = sl.index(max(sl)) + 1
